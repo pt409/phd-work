@@ -77,19 +77,23 @@ class Lammps :
             os.makedirs(new_work_dir)
             # Check input file for references to "old" .data or potentials files
             # Also check for dict elements
+            # This code is a bit messy to deal with possibility of 2+ word key
             new_lines = []
             with open(old_instance.work_dir+"/"+old_instance.input_file,'r') as old_file:
                 lines = old_file.readlines()
                 for line in lines:
                     words = line.split()
-                    key = words[0]
-                    # check for potential files or .data files
-                    if key in ("pair_coeff","read_data"):
-                        for i, word in enumerate(words):
-                            if os.path.isfile(new_work_dir+"/../"+word):
-                                words[i] = "../"+word
-                    if key in update_dict:
-                        words = [key,update_dict[key]]
+                    for j,_ in enumerate(words) :
+                        key = " ".join(words[:j+1])
+                        # check for potential files or .data files
+                        if key in ("pair_coeff","read_data"):
+                            for i, word in enumerate(words):
+                                if os.path.isfile(new_work_dir+"/../"+word):
+                                    words[i] = "../"+word
+                            break
+                        if key in update_dict:
+                            words = [key,update_dict[key]]
+                            break
                     new_lines += [" ".join(words)+"\n"]
             # Write new input file
             new_input_file = new_work_dir+"/"+old_instance.input_file
