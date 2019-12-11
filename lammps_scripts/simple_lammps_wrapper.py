@@ -8,6 +8,7 @@ Created on Tue Dec 10 12:28:16 2019
 
 import subprocess as sp
 import os
+import numpy as np
 
 class Lammps :
     
@@ -23,7 +24,11 @@ class Lammps :
         self.ready = False # Flag if class object has been correctly setup to run a lammps simulation
         self.error_msg = [] # Track error messages for this instance
         
-    def print_error(self): print("\n".join(self.error_msg))    
+    def print_error(self): print("\n".join(self.error_msg))
+
+    def input_loc(self): return self.work_dir+"/"+self.input_file
+    def data_loc(self): return self.work_dir+"/"+self.data_file
+    def log_loc(self): return self.work_dir+"/"+self.log_file    
     
     # Run function for lammps
     def run(self,total_attempts=3):
@@ -79,7 +84,7 @@ class Lammps :
             # Also check for dict elements
             # This code is a bit messy to deal with possibility of 2+ word key
             new_lines = []
-            with open(old_instance.work_dir+"/"+old_instance.input_file,'r') as old_file:
+            with open(old_instance.input_loc(),'r') as old_file:
                 lines = old_file.readlines()
                 for line in lines:
                     words = line.split()
@@ -111,3 +116,23 @@ class Lammps :
     @classmethod
     def command(cls,cores,lammps_path = "lmp_mpi") :
         cls.lammps_cmd = "mpirun -n "+str(cores)+" "+lammps_path
+        
+    def read_log(self,thermo_style,np_out=True):
+        # thermo_style is the list of strings which appear before the quantities to extract
+        # specify np_out=False to get a non numpy array output
+        with open(self.log_loc(),'r') as infile:
+            f = infile.readlines()
+        
+        out_list = [[] for _ in thermo_style] + [[]]  
+        for l in f:
+            l = l.split()
+            if 'Step' in l:
+                out_list[0] += [float(l[l.index('Step')+1])]
+            for i,word in enumerate(thermo_style):
+                if word in l:
+                    out_list[i+1] += [float(l[l.index(word)+2])]
+        
+        if np_out :            
+            return np.array(out_list)
+        else :
+            return out_list

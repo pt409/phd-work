@@ -21,7 +21,7 @@ start_time = time.time()
 
 ################################ PARAMETERS ###################################
 
-dx = 0.1 # Angstroms
+dx = -0.1 # Angstroms
 x = 0.0
 
 Lammps.command(6,lammps_path="lammps")
@@ -32,7 +32,7 @@ initial_run = Lammps.update(initial_run,"run",update_dict={"variable x_displace"
 
 displacement = []
 E = []
-while x < 3.52*np.sqrt(6)/2:
+while abs(x) < 3.52*np.sqrt(6)/2:
     current_run = Lammps.update(initial_run,str(x),update_dict={"variable x_displace":"equal "+str(x)})
     current_run.run()
     displacement += [x]
@@ -41,6 +41,6 @@ while x < 3.52*np.sqrt(6)/2:
         f = read_file.readlines()
         E += [float(f[-2].split()[-2])]
         
-plt.plot(displacement,E)
+plt.plot(displacement,E,'bo-')
 plt.xlabel("Displacement (A)")
 plt.ylabel("SFE energy (mJ/m^2)")
