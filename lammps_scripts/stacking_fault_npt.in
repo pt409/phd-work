@@ -5,7 +5,7 @@
 clear
 units		metal
 dimension	3
-boundary	p p s
+boundary	p p p
 atom_style	atomic
 variable latparam1 equal 3.52
 variable x_displace equal -1*(${latparam1}/sqrt(6))
@@ -40,15 +40,15 @@ fix 2 all npt temp ${temp} ${temp} 0.001 iso 0 0 0.1
 
 # Need to carefully setup initial velcoities to both correspond to correct temperature and be zero in x,y directions
 velocity all create ${temp} 9000000000 mom yes rot yes dist gaussian
-velocity all set 0.0 0.0 v_vz sum no units box
+velocity all set 0.0 0.0 NULL sum no units box
 velocity all scale ${temp} sum no
 
 thermo 1
 thermo_style custom temp press etotal
-thermo_modify line multi flush yes
+#thermo_modify line multi
 
 timestep 0.001
-run 100000
+run 200000
 
 ####################################
 # SIMULATION DONE
