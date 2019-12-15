@@ -1,0 +1,42 @@
+# Input file for Stack Fault Energy surface of Nickel: originally Richard Glaze, 2014
+# Modified Dec 2019 for generalised stacking faults
+
+# --------------------- INITIALIZAITION ---------------------
+clear
+units		metal
+dimension	3
+boundary	p p p
+atom_style	atomic
+variable latparam1 equal 3.52
+variable xdim equal ${latparam1}*10
+variable ydim equal ${latparam1}*10
+variable zdim equal ${latparam1}*10
+variable temp equal 300.0
+# --------------------- ATOM DEFINITION ---------------------
+lattice		fcc ${latparam1}
+region		whole block -.001 ${xdim} -.001 ${ydim} -.001 ${zdim} units box
+#the -.001 in the -x and -y and lower limit of region 1 are only to overcome a simple numerical issue but can be considered 0
+create_box 	2 whole
+lattice fcc ${latparam1} orient x 1 0 0 orient y 0 1 0 orient z 0 0 1
+create_atoms	1 region whole
+
+# --------------------- FORCE FIELDS ---------------------
+pair_style	eam/alloy
+pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+# --------------------- SETTINGS ---------------------
+
+fix 1 all npt temp ${temp} ${temp} 0.001 iso 0 0 0.1
+
+velocity all create ${temp} 9000000000 mom yes rot yes dist gaussian
+
+thermo 1
+thermo_style custom temp press etotal cella cellb cellc vol
+#thermo_modify line multi
+
+timestep 0.001
+run 200000
+
+####################################
+# SIMULATION DONE
+print "All done"
+print "Area = ${A} A^2"

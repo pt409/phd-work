@@ -23,17 +23,25 @@ start_time = time.time()
 
 dx = -0.2 # Angstroms
 x = 0.0
-A = (3.52*np.sqrt(6)/2*10)*(3.52*np.sqrt(2)/2*10)
+
 
 Lammps.command(6,lammps_path="lammps")
 
-initial_run = Lammps.setup('stacking_fault_npt.in')
+# Initial relaxation run, unconstrained, standard orientation
+relaxation_run = Lammps.setup('relaxation.in')
+relaxation_run.run()
+output = relaxation_run.read_log(["Temp","Press","Volume","Cella","Cellb","Cellc"])
+a = (np.mean(output[4][100000:])+np.mean(output[5][100000:])+np.mean(output[6][100000:]))/3
+a /= 10 # Size of cubic supercell used for relaxation
 
-initial_run = Lammps.update(initial_run,"npt_run",update_dict={"variable x_displace":"equal 0.0"})
+initial_run = Lammps.setup('stacking_fault_npt.in')
+initial_run = Lammps.update(initial_run,"npt_run",update_dict={"variable x_displace":"equal 0.0", "variable latparam1":"equal "+str(a)})
+
+A = (a*np.sqrt(6)/2*10)*(a*np.sqrt(2)/2*10)
 
 displacement = []
 E = []
-while abs(x) < 3.52*np.sqrt(6)/2:
+while abs(x) < a*np.sqrt(6)/2:
     current_run = Lammps.update(initial_run,str(x),update_dict={"variable x_displace":"equal "+str(x)})
     current_run.run()
     displacement += [x]
@@ -42,7 +50,7 @@ while abs(x) < 3.52*np.sqrt(6)/2:
     #    f = read_file.readlines()
     #    E += [float(f[-2].split()[-2])]
     output = current_run.read_log(["TotEng","Temp","Press"]) 
-    E += [np.mean(output[1][100000:])*1.60217657e4/A] # conversion factor from eV/A^2 to mJ/m^2
+    E += [np.mean(output[1][100000:])*1.60217657e4/(2*A)] # incl. conversion factor from eV/A^2 to mJ/m^2
     
 plt.plot(displacement,E,'bo-')
 plt.xlabel("Displacement (A)")
