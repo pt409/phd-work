@@ -15,6 +15,8 @@ sys.path.append('../')
 
 from simple_lammps_wrapper import Lammps
 import time
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 start_time = time.time()
@@ -29,6 +31,7 @@ Lammps.command(6,lammps_path="lammps")
 
 # Initial relaxation run, unconstrained, standard orientation
 relaxation_run = Lammps.setup('relaxation.in')
+relaxation_run = Lammps.update(relaxation_run,"lat_param")
 relaxation_run.run()
 output = relaxation_run.read_log(["Temp","Press","Volume","Cella","Cellb","Cellc"])
 a = (np.mean(output[4][100000:])+np.mean(output[5][100000:])+np.mean(output[6][100000:]))/3

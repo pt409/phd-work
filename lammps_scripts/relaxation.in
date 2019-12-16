@@ -36,7 +36,3 @@ thermo_style custom temp press etotal cella cellb cellc vol
 timestep 0.001
 run 200000
 
-####################################
-# SIMULATION DONE
-print "All done"
-print "Area = ${A} A^2"
