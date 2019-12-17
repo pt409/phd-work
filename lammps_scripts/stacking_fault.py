@@ -58,3 +58,4 @@ while abs(x) < a*np.sqrt(6)/2:
 plt.plot(displacement,E,'bo-')
 plt.xlabel("Displacement (A)")
 plt.ylabel("SFE energy (mJ/m^2)")
+plt.savefig("sfe_min.png")

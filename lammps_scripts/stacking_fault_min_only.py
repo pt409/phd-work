@@ -22,7 +22,7 @@ start_time = time.time()
 
 ################################ PARAMETERS ###################################
 
-dx = -0.2 # Angstroms
+steps = 30
 x = 0.0
 
 Lammps.command(6,lammps_path="lammps")
@@ -31,10 +31,13 @@ initial_run = Lammps.setup('stacking_fault_1.in')
 
 initial_run = Lammps.update(initial_run,"run",update_dict={"variable x_displace":"equal 0.0"})
 
+a = 3.52 # need to work this out properly via relaxing the cell first
+dx = -a*np.sqrt(6)/2/steps
+
 displacement = []
 E = []
-while abs(x) < 3.52*np.sqrt(6)/2:
-    current_run = Lammps.update(initial_run,str(x),update_dict={"variable x_displace":"equal "+str(x)})
+for step in range(steps):
+    current_run = Lammps.update(initial_run,"step_"+str(step),update_dict={"variable x_displace":"equal "+str(x)})
     current_run.run()
     displacement += [x]
     x += dx
@@ -42,6 +45,11 @@ while abs(x) < 3.52*np.sqrt(6)/2:
         f = read_file.readlines()
         E += [float(f[-2].split()[-2])]
         
-plt.plot(displacement,E)
+# Find extrema, and their nature
+first = [(E[(i+1)%steps]-E[i-1])/(2*dx) for i,_ in enumerate(E)]
+second = [(E[i-1]-2*E[i]+E[(i+1)%steps])/dx**2 for i,_ in enumerate(E)]
+        
+plt.plot(displacement,E,'bo-')
 plt.xlabel("Displacement (A)")
 plt.ylabel("SFE energy (mJ/m^2)")
+plt.savefig("sfe_min.png")
