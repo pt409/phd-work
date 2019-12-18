@@ -27,9 +27,14 @@ x = 0.0
 
 Lammps.command(6,lammps_path="lammps")
 
-initial_run = Lammps.setup('stacking_fault_1.in')
+# Find relaxed cell
+initial_run = Lammps.setup('stacking_fault_min_init.in')
+initial_run = Lammps.update(initial_run,"initial")
+initial_run.run()
 
-initial_run = Lammps.update(initial_run,"run",update_dict={"variable x_displace":"equal 0.0"})
+# This is just to setup correct file structure
+setup_run = Lammps.setup('stacking_fault_min.in')
+setup_run = Lammps.update(setup_run,"run",update_dict={"variable x_displace":"equal 0.0"})
 
 a = 3.52 # need to work this out properly via relaxing the cell first
 dx = -a*np.sqrt(6)/2/steps
@@ -37,7 +42,7 @@ dx = -a*np.sqrt(6)/2/steps
 displacement = []
 E = []
 for step in range(steps):
-    current_run = Lammps.update(initial_run,"step_"+str(step),update_dict={"variable x_displace":"equal "+str(x)})
+    current_run = Lammps.update(setup_run,"step_"+str(step),update_dict={"variable x_displace":"equal "+str(x)})
     current_run.run()
     displacement += [x]
     x += dx

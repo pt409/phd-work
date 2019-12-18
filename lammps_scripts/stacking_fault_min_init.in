@@ -5,17 +5,19 @@
 clear
 units		metal
 dimension	3
-boundary	p p s
+boundary	p p p
 atom_style	atomic
 variable latparam1 equal 3.52
 #variable x_displace equal -1*(${latparam1}/sqrt(6))
 variable xdim equal ${latparam1}*sqrt(6)/2*10
 variable ydim equal ${latparam1}*sqrt(2)/2*10
+variable zmid equal ${latparam1}*sqrt(3)*10
+variable ztop equal ${zmid}*2
 # --------------------- ATOM DEFINITION ---------------------
 lattice		fcc ${latparam1}
-region		1 block -.001 ${xdim} -.001 ${ydim} -.001 16.5 units box
-region 		2 block -.001 ${xdim} -.001 ${ydim} 16.5 36.5808 units box
-region		whole block 0 ${xdim} 0 ${ydim} 0 36.5808 units box
+region		1 block -.001 ${xdim} -.001 ${ydim} -.001 ${zmid} units box
+region 		2 block -.001 ${xdim} -.001 ${ydim} ${zmid} ${ztop} units box
+region		whole block 0 ${xdim} 0 ${ydim} 0 ${ztop} units box
 #the -.001 in the -x and -y and lower limit of region 1 are only to overcome a simple numerical issue but can be considered 0
 create_box 	2 whole
 lattice fcc ${latparam1} orient x 1 1 2 orient y -1 1 0 orient z -1 -1 1
@@ -53,7 +55,8 @@ variable Cf equal 1.60217657e-16
 variable A equal (${xdim}*${ydim})*1e-20
 variable SFE equal ((${Ef}-${Eo})*${Cf})/${A}
 
-write_data relaxed_config.data nofix nocoeff
+write_data relaxed_config nofix
+# add nocoeff to line above for more modern versions of lammps
 
 #variable Ef equal "c_eatoms" computes the final energy of the system after sliding is done
 #variable A is the area of the Stacking fault plane
