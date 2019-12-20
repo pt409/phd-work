@@ -47,7 +47,6 @@ displace_atoms top move ${x_displace} 0.0 0.0 units box
 #displace_atoms is the command neccessary to move atoms into the next stacking arrangement (ie: A -> B)
 
 fix 1 all setforce 0 0 NULL
-fix 2 all box/relax z 1.0 vmax 0.001
 min_style cg
 minimize 1e-10 1e-10 1000 1000
 variable Ef equal "c_eatoms"

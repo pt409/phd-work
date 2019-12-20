@@ -31,13 +31,13 @@ class Lammps :
     def log_loc(self): return self.work_dir+"/"+self.log_file    
     
     # Run function for lammps
-    def run(self,total_attempts=3):
+    def run(self,total_attempts=3,echo_msg=False):
         if self.ready:
             # have a few goes at running lammps in case it has some unknown random failure
             run_attempts = 0
             while run_attempts <= total_attempts :
                 # give a message saying which simulation is about to start
-                sp.call(['echo','Starting simulation for lammps file '+self.input_file])     
+                if echo_msg : sp.call(['echo','Starting simulation for lammps file '+self.input_file])     
                 # run lammps
                 full_lammps_cmd = " ".join([self.lammps_cmd,"-log",self.log_file,"-in",self.input_file,"> /dev/null"])
                 run = sp.Popen(full_lammps_cmd, shell=True, executable='/bin/bash',cwd=self.work_dir,stderr=sp.PIPE)
