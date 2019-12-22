@@ -3,6 +3,9 @@
 
 # --------------------- INITIALIZAITION ---------------------
 read_restart ../../initial/restart.opt
+
+change_box all boundary p p s
+
 variable latparam1 equal 3.52
 variable app_press equal 0.0
 variable x_displace equal -1*(${latparam1}/sqrt(6))
@@ -14,7 +17,8 @@ variable ztop equal ${zmid}*2
 # Not needed because restarted
 # --------------------- FORCE FIELDS ---------------------
 pair_style	eam/alloy
-pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+#pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+pair_coeff * * Ni99.eam.alloy Ni Ni
 # Also not needed because restarted
 # --------------------- SETTINGS ---------------------
 compute peratom all pe/atom
@@ -37,7 +41,7 @@ displace_atoms top move ${x_displace} 0.0 0.0 units box
 #displace_atoms is the command neccessary to move atoms into the next stacking arrangement (ie: A -> B)
 
 fix 1 all setforce 0 0 NULL
-fix 2 all box/relax z ${app_press} vmax 0.001
+#fix 2 all box/relax z ${app_press} vmax 0.001
 min_style cg
 minimize 1e-10 1e-10 1000 1000
 variable Ef equal "c_eatoms"

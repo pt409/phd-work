@@ -9,7 +9,7 @@ boundary	p p p
 atom_style	atomic
 variable sc equal 10
 variable latparam1 equal 3.52
-variable app_press equal 0.0
+variable app_press equal 1.0
 #variable x_displace equal -1*(${latparam1}/sqrt(6))
 variable xdim equal ${latparam1}*sqrt(6)/2*${sc}
 variable ydim equal ${latparam1}*sqrt(2)/2*${sc}
@@ -28,7 +28,8 @@ lattice fcc ${latparam1} orient x 1 1 2 orient y -1 1 0 orient z -1 -1 1
 create_atoms 	2 region 2 
 # --------------------- FORCE FIELDS ---------------------
 pair_style	eam/alloy
-pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+#pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+pair_coeff * * Ni99.eam.alloy Ni Ni
 # --------------------- SETTINGS ---------------------
 compute peratom all pe/atom
 compute eatoms all reduce sum c_peratom
