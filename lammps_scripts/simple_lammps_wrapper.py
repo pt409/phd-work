@@ -40,8 +40,9 @@ class Lammps :
                 if echo_msg : sp.call(['echo','Starting simulation for lammps file '+self.input_file])     
                 # run lammps
                 full_lammps_cmd = " ".join([self.lammps_cmd,"-log",self.log_file,"-in",self.input_file,"> /dev/null"])
-                run = sp.Popen(full_lammps_cmd, shell=True, executable='/bin/bash',cwd=self.work_dir,stderr=sp.PIPE)
+                run = sp.Popen(full_lammps_cmd, shell=True, executable='/bin/bash',cwd=self.work_dir,stdout=sp.PIPE,stderr=sp.PIPE)
                 run.wait()
+                stdout, stderr = run.communicate()
                 # check lammps return code
                 if run.returncode == 0 :
                     # Assign an output to object
@@ -49,7 +50,7 @@ class Lammps :
                 # returncode 1 means lammps failed in a controlled manner
                 elif run.returncode == 1 :
                     self.error_msg += ["Lammps encountered a known error for input file "+self.input_file]
-                    self.error_msg += [run.stderr]
+                    self.error_msg += [stdout.decode('ascii')]
                     sp.call(['echo',"\n".join(self.error_msg)])   
                     break
                 # other returncode means sim failed for some other reason
@@ -78,7 +79,8 @@ class Lammps :
         # Check if old_instance is actually an instance of the class
         if isinstance(old_instance,Lammps):
             # Create new directory for this one
-            new_work_dir = old_instance.work_dir+"/"+name
+            old_work_dir = old_instance.work_dir
+            new_work_dir = old_work_dir+"/"+name
             os.makedirs(new_work_dir)
             # Check input file for references to "old" .data or potentials files
             # Also check for dict elements
@@ -93,8 +95,8 @@ class Lammps :
                         # check for potential files or .data files
                         if key in ("pair_coeff","read_data"):
                             for i, word in enumerate(words):
-                                if os.path.isfile(new_work_dir+"/../"+word):
-                                    words[i] = "../"+word
+                                if os.path.isfile(new_work_dir+'/'+(new_work_dir.count('/')-old_work_dir.count('/'))*'../'+word):
+                                    words[i] = (new_work_dir.count('/')-old_work_dir.count('/'))*'../'+word
                             break
                         if key in update_dict:
                             words = [key,update_dict[key]]
@@ -136,3 +138,8 @@ class Lammps :
             return np.array(out_list)
         else :
             return out_list
+        
+    # Some alloy specific functions:
+    def dataf_2_alloy(self,*args):
+        # *args : dictionaries describing alloy composition
+        dataf = self.data_loc()

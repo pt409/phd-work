@@ -2,7 +2,7 @@
 # Modified Dec 2019 for generalised stacking faults
 
 # --------------------- INITIALIZAITION ---------------------
-read_restart ../../initial/restart.opt
+read_restart ../../init/restart.opt
 
 change_box all boundary p p s
 
@@ -17,8 +17,8 @@ variable ztop equal ${zmid}*2
 # Not needed because restarted
 # --------------------- FORCE FIELDS ---------------------
 pair_style	eam/alloy
-#pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
-pair_coeff * * Ni99.eam.alloy Ni Ni
+pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+#pair_coeff * * Ni99.eam.alloy Ni Ni
 # Also not needed because restarted
 # --------------------- SETTINGS ---------------------
 compute peratom all pe/atom
@@ -26,7 +26,7 @@ compute eatoms all reduce sum c_peratom
 compute csym all centro/atom fcc
 thermo 1
 thermo_style custom step pe c_eatoms
-dump 1 all custom 1 dump.relax.1.* id type xs ys zs c_peratom c_csym
+#dump 1 all custom 1 dump.relax.1.* id type xs ys zs c_peratom c_csym
 run 0
 #this command creates a model of the script before the displacement and minimization occur
 variable E equal "c_eatoms"

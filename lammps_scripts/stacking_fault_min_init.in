@@ -31,20 +31,22 @@ pair_style	eam/alloy
 #pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
 pair_coeff * * Ni99.eam.alloy Ni Ni
 # --------------------- SETTINGS ---------------------
+write_data elemental.data
+
 compute peratom all pe/atom
 compute eatoms all reduce sum c_peratom
 compute csym all centro/atom fcc
 thermo 1
 thermo_style custom step pe c_eatoms
-dump 1 all custom 1 dump.relax.1.* id type xs ys zs c_peratom c_csym
+#dump 1 all custom 1 dump.relax.1.* id type xs ys zs c_peratom c_csym
 run 0
 #this command creates a model of the script before the displacement and minimization occur
 variable E equal "c_eatoms"
 variable Eo equal $E
 #variable E equal "c_eatoms" computes the initial energy of the model before any sliding is done
 #E is necessary to store the initial energy in Eo
-group bot region 1
-group top region 2
+group bot type 1
+group top type 2
 #displace_atoms top move ${x_displace} 0.0 0.0 units box
 
 #displace_atoms is the command neccessary to move atoms into the next stacking arrangement (ie: A -> B)
