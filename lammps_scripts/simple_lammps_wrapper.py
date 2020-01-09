@@ -140,6 +140,36 @@ class Lammps :
             return out_list
         
     # Some alloy specific functions:
-    def dataf_2_alloy(self,*args):
+    def alloyify(self,*args):
         # *args : dictionaries describing alloy composition
         dataf = self.data_loc()
+        N_atoms = 0
+        M_types = 0
+        atoms_count = 0 # Flag which section of the file contains atomic positions
+        counts = np.zeros(len(*args)) # Want to count the number of atoms of each type
+        f=[] # store readlines
+        line_count = 0
+        with open(dataf,'r') as data_in:
+            # Analyse data as it is read in for number of atoms, types, etc
+            while True:
+                line = data_in.readline()
+                if not line: break
+                f += [line]
+                line_count += 1
+                line = line.rstrip().split()
+                if '#' in line[0] or not line : continue # skip comments and blank lines
+                if line[-1] == "atoms": N_atoms += int(line[0])
+                if line[-2:] == ["atom","types"]: M_types += int(line[0]) # Not used - should check this matches len(*args)
+                if line[0] == "Atoms": atoms_count += 1; continue # Flag start of atomic positions listings
+                if atoms_count == 1: atoms_start = 1*line_count
+                if atoms_count and atoms_count<=N_atoms:
+                    atom_type = int(line[1])
+                    counts[atom_type-1] += 1
+                    atoms_count += 1
+           
+        # Create list of atom types and assigned positions according to number of atoms of each type just found
+        # ... and supplied *args (dictionaries for alloy compositions)
+        for N,composition in zip(counts,*args):
+            all_positions = set(np.arange(N)+1)
+            
+            
