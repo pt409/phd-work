@@ -1,0 +1,56 @@
+# Input file for Stack Fault Energy surface of Nickel: originally Richard Glaze, 2014
+# Modified Dec 2019 for generalised stacking faults
+
+# --------------------- INITIALIZAITION ---------------------
+clear
+units		metal
+dimension	3
+boundary	p p p
+atom_style	atomic
+variable sc equal 10
+variable latparam1 equal 3.52
+variable app_press equal 1.0
+#variable x_displace equal -1*(${latparam1}/sqrt(6))
+variable xdim equal ${latparam1}*sqrt(6)/2*${sc}
+variable ydim equal ${latparam1}*sqrt(2)/2*${sc}
+variable zmid equal ${latparam1}*sqrt(3)*${sc}
+variable ztop equal ${zmid}*2
+# --------------------- ATOM DEFINITION ---------------------
+read_data ../elemental.data
+# --------------------- FORCE FIELDS ---------------------
+pair_style	eam/alloy
+pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+#pair_coeff * * Ni99.eam.alloy Ni Ni
+# --------------------- SETTINGS ---------------------
+compute peratom all pe/atom
+compute eatoms all reduce sum c_peratom
+compute csym all centro/atom fcc
+thermo 1
+thermo_style custom step pe c_eatoms
+run 0
+#this command creates a model of the script before the displacement and minimization occur
+variable E equal "c_eatoms"
+variable Eo equal $E
+#variable E equal "c_eatoms" computes the initial energy of the model before any sliding is done
+#E is necessary to store the initial energy in Eo
+group bot type 1
+group top type 2
+
+fix 1 all box/relax iso ${app_press} vmax 0.001
+min_style cg
+minimize 1e-10 1e-10 1000 1000
+variable Ef equal "c_eatoms"
+variable Cf equal 1.60217657e-16
+variable A equal (cella*cellb)*1e-20
+variable xdisptot equal cella/${sc}
+variable SFE equal ((${Ef}-${Eo})*${Cf})/${A}
+
+####################################
+# SIMULATION DONE
+print "All done"
+print "Total lattice in x dir = ${xdisptot} A"
+print "Initial energy of atoms = ${Eo} eV"
+print "Final energy of atoms = ${Ef} eV"
+print "Stacking-fault energy = ${SFE} mJ/m^2"
+
+write_restart restart.opt

@@ -22,23 +22,26 @@ start_time = time.time()
 
 ################################ PARAMETERS ###################################
 
-steps = 40
+steps = 10
 x = 0.0
 
 Lammps.command(6,lammps_path="lammps")
 
 # Find relaxed cell
-initial_run = Lammps.setup('stacking_fault_min_init.in')
-initial_run = Lammps.update(initial_run,"initial")
-initial_run.run()
+init_1 = Lammps.setup('init_1.in')
+init_2 = Lammps.setup('init_2.in')
+init_1 = Lammps.update(init_1,"sfe_script")
+init_2 = Lammps.update(init_2,"sfe_script/init")
+init_1.run()
+init_2.run()
 
-with open(initial_run.log_loc()) as read_file:
+with open(init_2.log_loc()) as read_file:
         f = read_file.readlines()
         x_tot = float(f[-17].split()[-2]) # The maximum displacement that will return cell to original equilibrium
 
 # This is just to setup correct file structure
 setup_run = Lammps.setup('stacking_fault_min_restart.in')
-setup_run = Lammps.update(setup_run,"run",update_dict={"variable x_displace":"equal 0.0"})
+setup_run = Lammps.update(setup_run,"sfe_script/run",update_dict={"variable x_displace":"equal 0.0"})
 
 a = x_tot*2/np.sqrt(6)
 dx = -x_tot/2/(steps-1)
@@ -68,5 +71,5 @@ plt.plot([-3*a/2/np.sqrt(6),-3*a/2/np.sqrt(6)],[0,E.max()],'r')
 plt.plot(displacement,E,'bo-')
 plt.xlabel("Displacement (A)")
 plt.ylabel("SFE energy (mJ/m^2)")
-plt.savefig("sfe_min_opt.png",dpi=400)
+plt.savefig("test.png",dpi=400)
 plt.close()
