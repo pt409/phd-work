@@ -9,6 +9,8 @@ Created on Tue Dec 10 12:28:16 2019
 import subprocess as sp
 import os
 import numpy as np
+from random import sample
+from mendeleev import element
 
 class Lammps :
     
@@ -64,7 +66,8 @@ class Lammps :
     @classmethod
     def setup(cls,input_file,data_file=None):
         if os.path.isfile(input_file) and (not data_file or os.path.isfile(data_file)):
-            new_object = cls(input_file,data_file)
+            new_object = cls(input_file.split("/")[-1],data_file.split("/")[-1])
+            new_object.work_dir = "./"+"/".join(input_file.split("/")[:-1])
             new_object.ready = True
             return new_object
         else :
@@ -146,7 +149,11 @@ class Lammps :
         N_atoms = 0
         M_types = 0
         atoms_count = 0 # Flag which section of the file contains atomic positions
-        counts = np.zeros(len(*args)) # Want to count the number of atoms of each type
+        atoms_start = 0 # Starting line of Atoms block within the data file.
+        masses_flag = 1
+        masses_start = 0 # Starting line pf masses block within 
+        counts = np.zeros(len(args)) # Want to count the number of atoms of each type
+        in_types = [[] for _ in range(len(args))] # Find and store the intitial atom types for each atom
         f=[] # store readlines
         line_count = 0
         with open(dataf,'r') as data_in:
@@ -157,19 +164,48 @@ class Lammps :
                 f += [line]
                 line_count += 1
                 line = line.rstrip().split()
-                if '#' in line[0] or not line : continue # skip comments and blank lines
+                if not line : continue # skip blank lines
+                if '#' in line[0] : continue # skip comments
                 if line[-1] == "atoms": N_atoms += int(line[0])
                 if line[-2:] == ["atom","types"]: M_types += int(line[0]) # Not used - should check this matches len(*args)
                 if line[0] == "Atoms": atoms_count += 1; continue # Flag start of atomic positions listings
-                if atoms_count == 1: atoms_start = 1*line_count
+                if atoms_count == 1: atoms_start += line_count-1
+                if line[0] == "Masses": masses_flag = 1; continue
+                if masses_flag == 1: masses_start += line_count-1; masses_flag = 0
                 if atoms_count and atoms_count<=N_atoms:
                     atom_type = int(line[1])
                     counts[atom_type-1] += 1
+                    in_types[atom_type-1] += [int(line[0])]
                     atoms_count += 1
            
+        # Find all the atom types suplied
+        elements = {}
+        for _ in args: elements.update(_)
+        elements = sorted(elements.keys())
         # Create list of atom types and assigned positions according to number of atoms of each type just found
         # ... and supplied *args (dictionaries for alloy compositions)
-        for N,composition in zip(counts,*args):
-            all_positions = set(np.arange(N)+1)
-            
-            
+        final_dict = {}
+        for N,inds,composition in zip(counts,in_types,args):
+            for key in composition: composition[key] = int(round(N*composition[key]))
+            composition[max(composition)] += int(N-sum(composition.values())) # make sure all atoms are accounted for
+            # Track which atom indices have yet to be assigned an element.
+            unassigned_inds = set(inds)
+            for el in elements:
+                type_num = elements.index(el)+1 # Actually assign types by number not element
+                selection = set(sample(unassigned_inds,composition.get(el,0)))
+                unassigned_inds -= selection
+                for i in selection: final_dict[i] = type_num
+        
+        # Can now write out a new data file 
+        self.data_file = "alloyified_"+self.data_file
+        with open(self.data_loc(),'w') as data_out:
+            for line_count,line in enumerate(f):
+                if line_count >= atoms_start and line_count < (atoms_start + N_atoms):
+                    line = line.split()
+                    line[1] = str(final_dict[int(line[0])])
+                    line = " ".join(line)+"\n"
+                if line_count == masses_start: 
+                    line = "\n".join([" ".join([str(i+1),str(element(el).mass)]) for i,el in enumerate(elements)])+"\n"
+                if line_count > masses_start and line_count < (masses_start + M_types):
+                    continue # Con't write the original masses at all
+                data_out.write(line)

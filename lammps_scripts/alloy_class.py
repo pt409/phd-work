@@ -8,33 +8,13 @@ Created on Thu May  9 13:21:45 2019
 # This class allows for alloys to be set up with unqiue compositions, partitioned into phases, and assigned properties
 
 import numpy as np
+from mendeleev import element
 
 class Material :
-    periodic_table = {'Ni' : 58.693,
-                      'Al' : 26.982,
-                      'Cr' : 51.996,
-                      'Nb' : 92.906,
-                      'Mo' : 95.95,
-                      'C'  : 12.011,
-                      'Zr' : 91.224,
-                      'Co' : 58.933,
-                      'W'  : 183.84,
-                      'B'  : 10.81,
-                      'Ti' : 47.867,
-                      'Ta' : 180.95,
-                      'Si' : 28.085,
-                      'Cu' : 63.546,
-                      'Mn' : 54.938,
-                      'P'  : 30.974,
-                      'S'  : 32.06,
-                      'Fe' : 55.845,
-                      'Bi' : 208.98,
-                      'Hf' : 178.49
-                      }
-    
+  
     def __init__(self,mol_pc=None) :
         self.composition = self.check_pc(mol_pc)
-        self.mol_mass = sum([0.01*self.composition[el]*self.periodic_table[el] for el in self.composition])
+        self.mol_mass = sum([0.01*self.composition[el]*element(el).mass for el in self.composition])
         
         # Experimental data
         self.exp_density = np.array([])
@@ -77,10 +57,10 @@ class Material :
         mol_pc = {}
         mol_tot = 0
         for m in wt_pc_2 :
-            mol_tot += wt_pc_2[m]/cls.periodic_table[m]
+            mol_tot += wt_pc_2[m]/element(m).mass
     
         for m in wt_pc_2 :
-            mol_pc[m] = round(100*(wt_pc_2[m]/cls.periodic_table[m])/mol_tot,4)
+            mol_pc[m] = round(100*(wt_pc_2[m]/element(m).mass)/mol_tot,4)
         return cls(mol_pc)
     
     @staticmethod
