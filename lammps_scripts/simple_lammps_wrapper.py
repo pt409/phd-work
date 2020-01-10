@@ -66,7 +66,10 @@ class Lammps :
     @classmethod
     def setup(cls,input_file,data_file=None):
         if os.path.isfile(input_file) and (not data_file or os.path.isfile(data_file)):
-            new_object = cls(input_file.split("/")[-1],data_file.split("/")[-1])
+            if not data_file:
+                new_object = cls(input_file.split("/")[-1],data_file)
+            else:
+                new_object = cls(input_file.split("/")[-1],data_file.split("/")[-1])
             new_object.work_dir = "./"+"/".join(input_file.split("/")[:-1])
             new_object.ready = True
             return new_object

@@ -16,6 +16,9 @@ variable ydim equal ${latparam1}*sqrt(2)/2*${sc}
 variable zmid equal ${latparam1}*sqrt(3)*${sc}
 variable ztop equal ${zmid}*2
 # --------------------- ATOM DEFINITION ---------------------
+region		1 block -.001 ${xdim} -.001 ${ydim} -.001 ${zmid} units box
+region 		2 block -.001 ${xdim} -.001 ${ydim} ${zmid} ${ztop} units box
+region		whole block 0 ${xdim} 0 ${ydim} 0 ${ztop} units box
 read_data ../elemental.data
 # --------------------- FORCE FIELDS ---------------------
 pair_style	eam/alloy
@@ -33,8 +36,8 @@ variable E equal "c_eatoms"
 variable Eo equal $E
 #variable E equal "c_eatoms" computes the initial energy of the model before any sliding is done
 #E is necessary to store the initial energy in Eo
-group bot type 1
-group top type 2
+group bot region 1
+group top region 2
 
 fix 1 all box/relax iso ${app_press} vmax 0.001
 min_style cg
