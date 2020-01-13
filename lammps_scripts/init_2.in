@@ -19,7 +19,7 @@ variable ztop equal ${zmid}*2
 region		1 block -.001 ${xdim} -.001 ${ydim} -.001 ${zmid} units box
 region 		2 block -.001 ${xdim} -.001 ${ydim} ${zmid} ${ztop} units box
 region		whole block 0 ${xdim} 0 ${ydim} 0 ${ztop} units box
-read_data ../elemental.data
+read_data elemental.data
 # --------------------- FORCE FIELDS ---------------------
 pair_style	eam/alloy
 pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni

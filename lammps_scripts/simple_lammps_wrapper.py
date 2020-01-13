@@ -70,7 +70,7 @@ class Lammps :
                 new_object = cls(input_file.split("/")[-1],data_file)
             else:
                 new_object = cls(input_file.split("/")[-1],data_file.split("/")[-1])
-            new_object.work_dir = "./"+"/".join(input_file.split("/")[:-1])
+            new_object.work_dir = "."+"/".join(input_file.split("/")[:-1])
             new_object.ready = True
             return new_object
         else :
@@ -98,25 +98,31 @@ class Lammps :
                     words = line.split()
                     for j,_ in enumerate(words) :
                         key = " ".join(words[:j+1])
+                        # check for user specified update keywords
+                        if key in update_dict:
+                            words = [key,update_dict[key]]
                         # check for potential files or .data files
                         if key in ("pair_coeff","read_data"):
                             for i, word in enumerate(words):
                                 if os.path.isfile(new_work_dir+'/'+(new_work_dir.count('/')-old_work_dir.count('/'))*'../'+word):
                                     words[i] = (new_work_dir.count('/')-old_work_dir.count('/'))*'../'+word
-                            break
-                        if key in update_dict:
-                            words = [key,update_dict[key]]
-                            break
+                        if key in update_dict or key in ("pair_coeff","read_data"):
+                            break # Make sure a found keyword in the file isn't double counted whilst searching the whole line
                     new_lines += [" ".join(words)+"\n"]
             # Write new input file
             new_input_file = new_work_dir+"/"+old_instance.input_file
             with open(new_input_file,"w+") as new_file:
                 new_file.writelines(new_lines)
             # Initialise new class instance
-            new_data_file = old_instance.data_file
-            new_instance = cls.setup(old_instance.input_file,new_data_file)
+            if not new_data_file: 
+                new_mvd_data_file = old_instance.data_file
+            else:
+                new_mvd_data_file = new_data_file.split("/")[-1]
+                sp.call(["cp",new_data_file,new_work_dir+"/"+new_mvd_data_file])
+            new_instance = cls(input_file=old_instance.input_file,data_file=new_mvd_data_file)
             new_instance.work_dir = new_work_dir
             new_instance.log_file = old_instance.log_file
+            new_instance.ready = True
             return new_instance                                
         
     # use this to setup the command that will be used to run lammps

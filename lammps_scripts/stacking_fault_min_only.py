@@ -22,17 +22,17 @@ start_time = time.time()
 
 ################################ PARAMETERS ###################################
 
-steps = 30
+steps = 10
 x = 0.0
 
 Lammps.command(6,lammps_path="lammps")
 
 # Find relaxed cell
 init_1 = Lammps.setup('init_1.in')
-init_2 = Lammps.setup('init_2.in')
 init_1 = Lammps.update(init_1,"sfe_script")
-init_2 = Lammps.update(init_2,"sfe_script/init")
 init_1.run()
+init_2 = Lammps.setup('init_2.in')
+init_2 = Lammps.update(init_2,"sfe_script/init",new_data_file="sfe_script/elemental.data")
 init_2.run()
 
 with open(init_2.log_loc()) as read_file:
