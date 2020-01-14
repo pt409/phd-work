@@ -100,7 +100,7 @@ class Lammps :
                         key = " ".join(words[:j+1])
                         # check for user specified update keywords
                         if key in update_dict:
-                            words = [key,update_dict[key]]
+                            words = [key]+update_dict[key].split()
                         # check for potential files or .data files
                         if key in ("pair_coeff","read_data"):
                             for i, word in enumerate(words):
@@ -209,6 +209,10 @@ class Lammps :
         self.data_file = "alloyified_"+self.data_file
         with open(self.data_loc(),'w') as data_out:
             for line_count,line in enumerate(f):
+                if "atom types" in line: 
+                    line = line.split()
+                    line[0] = str(len(elements))
+                    line = " ".join(line)+"\n"
                 if line_count >= atoms_start and line_count < (atoms_start + N_atoms):
                     line = line.split()
                     line[1] = str(final_dict[int(line[0])])

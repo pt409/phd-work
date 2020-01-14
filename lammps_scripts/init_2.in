@@ -7,14 +7,16 @@ units		metal
 dimension	3
 boundary	p p p
 atom_style	atomic
-variable sc equal 10
+variable sca equal 16
+variable scb equal 28
+variable scc equal 10
 variable latparam1 equal 3.52
-variable app_press equal 1.0
-#variable x_displace equal -1*(${latparam1}/sqrt(6))
-variable xdim equal ${latparam1}*sqrt(6)/2*${sc}
-variable ydim equal ${latparam1}*sqrt(2)/2*${sc}
-variable zmid equal ${latparam1}*sqrt(3)*${sc}
+variable x_displace equal -1*(${latparam1}/sqrt(6))
+variable xdim equal ${latparam1}*sqrt(6)/2*${sca}
+variable ydim equal ${latparam1}*sqrt(2)/2*${scb}
+variable zmid equal ${latparam1}*sqrt(3)*${scc}
 variable ztop equal ${zmid}*2
+variable app_press equal 1.0
 # --------------------- ATOM DEFINITION ---------------------
 region		1 block -.001 ${xdim} -.001 ${ydim} -.001 ${zmid} units box
 region 		2 block -.001 ${xdim} -.001 ${ydim} ${zmid} ${ztop} units box
@@ -45,7 +47,7 @@ minimize 1e-10 1e-10 1000 1000
 variable Ef equal "c_eatoms"
 variable Cf equal 1.60217657e-16
 variable A equal (cella*cellb)*1e-20
-variable xdisptot equal cella/${sc}
+variable xdisptot equal cella/${sca}
 variable SFE equal ((${Ef}-${Eo})*${Cf})/${A}
 
 ####################################

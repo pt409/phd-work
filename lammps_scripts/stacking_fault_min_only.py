@@ -22,7 +22,7 @@ start_time = time.time()
 
 ################################ PARAMETERS ###################################
 
-steps = 10
+steps = 30
 x = 0.0
 
 Lammps.command(6,lammps_path="lammps")

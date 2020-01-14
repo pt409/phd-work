@@ -7,13 +7,14 @@ units		metal
 dimension	3
 boundary	p p p
 atom_style	atomic
-variable sc equal 10
+variable sca equal 16
+variable scb equal 28
+variable scc equal 10
 variable latparam1 equal 3.52
-variable app_press equal 1.0
-#variable x_displace equal -1*(${latparam1}/sqrt(6))
-variable xdim equal ${latparam1}*sqrt(6)/2*${sc}
-variable ydim equal ${latparam1}*sqrt(2)/2*${sc}
-variable zmid equal ${latparam1}*sqrt(3)*${sc}
+variable x_displace equal -1*(${latparam1}/sqrt(6))
+variable xdim equal ${latparam1}*sqrt(6)/2*${sca}
+variable ydim equal ${latparam1}*sqrt(2)/2*${scb}
+variable zmid equal ${latparam1}*sqrt(3)*${scc}
 variable ztop equal ${zmid}*2
 # --------------------- ATOM DEFINITION ---------------------
 lattice		fcc ${latparam1}
