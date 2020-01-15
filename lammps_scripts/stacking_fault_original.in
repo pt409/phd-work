@@ -1,4 +1,5 @@
 # Input file for Stack Fault Energy surface of Nickel: originally Richard Glaze, 2014
+# Source: https://icme.hpc.msstate.edu/mediawiki/index.php/LAMMPS_Intrinsic_Stacking-Fault_Energy
 # Modified Dec 2019 for generalised stacking faults
 
 # --------------------- INITIALIZAITION ---------------------
