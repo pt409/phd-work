@@ -1,0 +1,35 @@
+# Input file for Stack Fault Energy surface of Nickel: originally Richard Glaze, 2014
+# Modified Dec 2019 for generalised stacking faults
+
+# --------------------- INITIALIZAITION ---------------------
+clear
+units		metal
+dimension	3
+boundary	p p p
+atom_style	atomic
+variable sca equal 16
+variable scb equal 28
+variable scc equal 10
+variable latparam1 equal 3.52
+variable x_displace equal -1*(${latparam1}/sqrt(6))
+variable xdim equal ${latparam1}*sqrt(6)/2*${sca}
+variable ydim equal ${latparam1}*sqrt(2)/2*${scb}
+variable zmid equal ${latparam1}*sqrt(3)*${scc}
+variable ztop equal ${zmid}*2
+# --------------------- ATOM DEFINITION ---------------------
+lattice		fcc ${latparam1}
+region		1 block -.001 ${xdim} -.001 ${ydim} -.001 ${zmid} units box
+region 		2 block -.001 ${xdim} -.001 ${ydim} ${zmid} ${ztop} units box
+region		whole block 0 ${xdim} 0 ${ydim} 0 ${ztop} units box
+#the -.001 in the -x and -y and lower limit of region 1 are only to overcome a simple numerical issue but can be considered 0
+create_box 	2 whole
+lattice fcc ${latparam1} orient x 1 1 2 orient y -1 1 0 orient z -1 -1 1
+create_atoms	1 region 1
+lattice fcc ${latparam1} orient x 1 1 2 orient y -1 1 0 orient z -1 -1 1
+create_atoms 	2 region 2 
+# --------------------- FORCE FIELDS ---------------------
+pair_style	eam/alloy
+pair_coeff * * NiAlCoCrMoTiWTa.set Ni Ni
+#pair_coeff * * Ni99.eam.alloy Ni Ni
+# --------------------- SETTINGS ---------------------
+write_data elemental.data
