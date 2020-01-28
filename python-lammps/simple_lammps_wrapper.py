@@ -79,6 +79,25 @@ class Lammps :
             new_object = cls()
             new_object.error_msg += [new_err_msg]
             return new_object
+        
+    @classmethod
+    def default_setup(cls,script,loc="."):
+        script_lib = {"sfe_setup":"/sfe_scripts/sfe_1.in",
+                      "sfe_min":"/sfe_scripts/sfe_2.in",
+                      "sfe_step":"/sfe_scripts/sfe_3_restart.in",
+                      "apbe_setup":"/sfe_scripts/apbe_1.in",
+                      "apbe_min":"/sfe_scripts/apbe_2.in",
+                      "apbe_step":"/sfe_scripts/apbe_3_restart.in"}
+        try:
+            desired_file = sys.path[0]+"/lammps_scripts"+script_lib[script] if sys.path[0] != "" else "lammps_scripts"+script_lib[script]
+            input_file = loc + "/" + script_lib[script].split("/")[-1] if loc != "." else script_lib[script].split("/")[-1]
+            sp.call(" ".join(["mkdir","-p",loc,"&&","cp",desired_file,input_file]),shell=True,executable='/bin/bash')
+            new_object = cls.setup(input_file)
+            return new_object
+        except KeyError: 
+            new_object = cls()
+            new_object.error_msg += ["Script name supplied does not exist"]
+            return new_object
     
     # can initialise using a currently existing instance
     @classmethod
@@ -88,7 +107,7 @@ class Lammps :
             # Create new directory for this one
             old_work_dir = old_instance.work_dir
             new_work_dir = old_work_dir+"/"+name
-            os.makedirs(new_work_dir)
+            sp.call(["mkdir","-p",new_work_dir])
             # Check input file for references to "old" .data or potentials files
             # Also check for dict elements
             # This code is a bit messy to deal with possibility of 2+ word key
