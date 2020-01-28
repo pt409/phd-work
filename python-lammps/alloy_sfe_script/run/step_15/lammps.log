@@ -1,0 +1,272 @@
+LAMMPS (17 Nov 2015)
+WARNING: OMP_NUM_THREADS environment is not set. (../comm.cpp:90)
+  using 1 OpenMP thread(s) per MPI task
+# Input file for Stack Fault Energy surface of Nickel: originally Richard Glaze, 2014
+# Modified Dec 2019 for generalised stacking faults
+
+# --------------------- INITIALIZAITION ---------------------
+read_restart ../../init/restart.opt
+  orthogonal box = (-0.305467 -0.308632 -0.539994) to (69.2831 70.0011 122.476)
+  1 by 2 by 3 MPI processor grid
+  53760 atoms
+
+change_box all boundary p p s
+variable sca equal 16
+variable scb equal 28
+variable scc equal 10
+variable latparam1 equal 3.52
+variable x_displace equal -1.1248151589142654
+variable xdim equal ${latparam1}*sqrt(6)/2*${sca}
+variable xdim equal 3.52*sqrt(6)/2*${sca}
+variable xdim equal 3.52*sqrt(6)/2*16
+variable ydim equal ${latparam1}*sqrt(2)/2*${scb}
+variable ydim equal 3.52*sqrt(2)/2*${scb}
+variable ydim equal 3.52*sqrt(2)/2*28
+variable zmid equal ${latparam1}*sqrt(3)*${scc}
+variable zmid equal 3.52*sqrt(3)*${scc}
+variable zmid equal 3.52*sqrt(3)*10
+variable ztop equal ${zmid}*2
+variable ztop equal 60.9681884264245*2
+# --------------------- ATOM DEFINITION ---------------------
+# Not needed because restarted
+# --------------------- FORCE FIELDS ---------------------
+pair_style eam/alloy
+pair_coeff * * ../../../NiAlCoCrMoTiWTa.set Al Co Ni
+#pair_coeff * * Ni99.eam.alloy Ni Ni
+# Also not needed because restarted
+# --------------------- SETTINGS ---------------------
+compute peratom all pe/atom
+compute eatoms all reduce sum c_peratom
+compute csym all centro/atom fcc
+thermo 1
+thermo_style custom step pe c_eatoms
+#dump 1 all custom 1 dump.relax.1.* id type xs ys zs c_peratom c_csym
+run 0
+WARNING: No fixes defined, atoms won't move (../verlet.cpp:55)
+Neighbor list info ...
+  2 neighbor list requests
+  update every 1 steps, delay 10 steps, check yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8.56034
+  ghost atom cutoff = 8.56034
+  binsize = 4.28017 -> bins = 17 17 29
+Memory usage per processor = 5.18855 Mbytes
+Step PotEng eatoms 
+      38   -234482.26   -234482.26 
+Loop time of 4.05312e-06 on 6 procs for 0 steps with 53760 atoms
+
+143.9% CPU use with 6 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0          | 0          | 0          |   0.0 |  0.00
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0          | 0          | 0          |   0.0 |  0.00
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 4.053e-06  |            |       |100.00
+
+Nlocal:    8960 ave 9125 max 8849 min
+Histogram: 2 1 0 0 1 0 1 0 0 1
+Nghost:    12178 ave 14551 max 10965 min
+Histogram: 4 0 0 0 0 0 0 0 0 2
+Neighs:    976936 ave 1.02163e+06 max 917197 min
+Histogram: 1 1 0 0 0 0 1 1 0 2
+FullNghs:  0 ave 0 max 0 min
+Histogram: 6 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 5861616
+Ave neighs/atom = 109.033
+Neighbor list builds = 0
+Dangerous builds = 0
+#this command creates a model of the script before the displacement and minimization occur
+variable E equal "c_eatoms"
+variable Eo equal $E
+variable Eo equal -234482.259789123
+#variable E equal "c_eatoms" computes the initial energy of the model before any sliding is done
+#E is necessary to store the initial energy in Eo
+#group bot region 1
+#group top region 2
+# Groups are preserved after restart
+displace_atoms top move ${x_displace} 0.0 0.0 units box
+displace_atoms top move -1.12481515891427 0.0 0.0 units box
+
+#displace_atoms is the command neccessary to move atoms into the next stacking arrangement (ie: A -> B)
+
+fix 1 all setforce 0 0 NULL
+min_style cg
+minimize 1e-10 1e-10 1000 1000
+WARNING: Resetting reneighboring criteria during minimization (../min.cpp:168)
+Neighbor list info ...
+  2 neighbor list requests
+  update every 1 steps, delay 0 steps, check yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8.56034
+  ghost atom cutoff = 8.56034
+  binsize = 4.28017 -> bins = 17 17 29
+Memory usage per processor = 7.68855 Mbytes
+Step PotEng eatoms 
+      38   -234148.08   -234148.08 
+      39   -234250.83   -234250.83 
+      40   -234280.17   -234280.17 
+      41   -234292.42   -234292.42 
+      42   -234299.74   -234299.74 
+      43    -234304.7    -234304.7 
+      44   -234307.73   -234307.73 
+      45   -234308.84   -234308.84 
+      46   -234309.99   -234309.99 
+      47   -234310.61   -234310.61 
+      48   -234310.88   -234310.88 
+      49   -234311.03   -234311.03 
+      50   -234311.25   -234311.25 
+      51   -234311.45   -234311.45 
+      52   -234311.52   -234311.52 
+      53   -234311.59   -234311.59 
+      54   -234311.66   -234311.66 
+      55   -234311.72   -234311.72 
+      56   -234311.77   -234311.77 
+      57   -234311.81   -234311.81 
+      58   -234311.83   -234311.83 
+      59   -234311.85   -234311.85 
+      60   -234311.87   -234311.87 
+      61   -234311.88   -234311.88 
+      62    -234311.9    -234311.9 
+      63   -234311.91   -234311.91 
+      64   -234311.92   -234311.92 
+      65   -234311.93   -234311.93 
+      66   -234311.94   -234311.94 
+      67   -234311.95   -234311.95 
+      68   -234311.96   -234311.96 
+      69   -234311.96   -234311.96 
+      70   -234311.97   -234311.97 
+      71   -234311.98   -234311.98 
+      72   -234311.98   -234311.98 
+      73   -234311.99   -234311.99 
+      74   -234311.99   -234311.99 
+      75      -234312      -234312 
+      76      -234312      -234312 
+      77   -234312.01   -234312.01 
+      78   -234312.01   -234312.01 
+      79   -234312.02   -234312.02 
+      80   -234312.02   -234312.02 
+      81   -234312.02   -234312.02 
+      82   -234312.03   -234312.03 
+      83   -234312.03   -234312.03 
+      84   -234312.03   -234312.03 
+      85   -234312.04   -234312.04 
+      86   -234312.04   -234312.04 
+      87   -234312.04   -234312.04 
+      88   -234312.05   -234312.05 
+      89   -234312.05   -234312.05 
+      90   -234312.05   -234312.05 
+      91   -234312.05   -234312.05 
+      92   -234312.06   -234312.06 
+      93   -234312.06   -234312.06 
+      94   -234312.06   -234312.06 
+      95   -234312.06   -234312.06 
+      96   -234312.07   -234312.07 
+      97   -234312.07   -234312.07 
+      98   -234312.07   -234312.07 
+      99   -234312.07   -234312.07 
+     100   -234312.07   -234312.07 
+     101   -234312.08   -234312.08 
+     102   -234312.08   -234312.08 
+     103   -234312.08   -234312.08 
+     104   -234312.08   -234312.08 
+     105   -234312.08   -234312.08 
+     106   -234312.08   -234312.08 
+     107   -234312.08   -234312.08 
+     108   -234312.08   -234312.08 
+     109   -234312.09   -234312.09 
+     110   -234312.09   -234312.09 
+     111   -234312.09   -234312.09 
+     112   -234312.09   -234312.09 
+     113   -234312.09   -234312.09 
+     114   -234312.09   -234312.09 
+     115   -234312.09   -234312.09 
+     116   -234312.09   -234312.09 
+     117   -234312.09   -234312.09 
+     118   -234312.09   -234312.09 
+     119   -234312.09   -234312.09 
+     120   -234312.09   -234312.09 
+     121   -234312.09   -234312.09 
+     122   -234312.09   -234312.09 
+     123   -234312.09   -234312.09 
+     124   -234312.09   -234312.09 
+     125   -234312.09   -234312.09 
+     126   -234312.09   -234312.09 
+     127   -234312.09   -234312.09 
+     128   -234312.09   -234312.09 
+     129   -234312.09   -234312.09 
+     130   -234312.09   -234312.09 
+     131   -234312.09   -234312.09 
+     132   -234312.09   -234312.09 
+     133   -234312.09   -234312.09 
+     134   -234312.09   -234312.09 
+     135   -234312.09   -234312.09 
+     136   -234312.09   -234312.09 
+     137   -234312.09   -234312.09 
+     138   -234312.09   -234312.09 
+     139   -234312.09   -234312.09 
+     140   -234312.09   -234312.09 
+Loop time of 11.681 on 6 procs for 102 steps with 53760 atoms
+
+99.7% CPU use with 6 MPI tasks x 1 OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final = 
+        -234148.082761     -234312.094662     -234312.094684
+  Force two-norm initial, final = 80.7175 0.0174753
+  Force max component initial, final = 3.88593 0.00299302
+  Final line search alpha, max atom move = 1 0.00299302
+  Iterations, force evaluations = 102 196
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 8.6911     | 9.7274     | 11.022     |  29.8 | 83.28
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.37107    | 1.6791     | 2.7266     |  72.4 | 14.37
+Output  | 0.038498   | 0.039      | 0.041309   |   0.5 |  0.33
+Modify  | 0.013521   | 0.015278   | 0.018252   |   1.7 |  0.13
+Other   |            | 0.2202     |            |       |  1.89
+
+Nlocal:    8960 ave 9125 max 8849 min
+Histogram: 2 1 0 0 1 0 1 0 0 1
+Nghost:    12262 ave 14635 max 11009 min
+Histogram: 4 0 0 0 0 0 0 0 0 2
+Neighs:    977990 ave 1.02484e+06 max 917151 min
+Histogram: 1 1 0 0 0 0 2 0 0 2
+FullNghs:  0 ave 0 max 0 min
+Histogram: 6 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 5867940
+Ave neighs/atom = 109.151
+Neighbor list builds = 0
+Dangerous builds = 0
+variable Ef equal "c_eatoms"
+variable Cf equal 1.60217657e-16
+variable A equal (cella*cellb)*1e-20
+variable SFE equal ((${Ef}-${Eo})*${Cf})/${A}
+variable SFE equal ((-234312.094683612-${Eo})*${Cf})/${A}
+variable SFE equal ((-234312.094683612--234482.259789123)*${Cf})/${A}
+variable SFE equal ((-234312.094683612--234482.259789123)*1.60217657e-16)/${A}
+variable SFE equal ((-234312.094683612--234482.259789123)*1.60217657e-16)/4.89275170426208e-17
+
+#variable Ef equal "c_eatoms" computes the final energy of the system after sliding is done
+#variable A is the area of the Stacking fault plane
+#variable Cf is the conversion factor of electro volts to millijoules
+#variable SFE is the stacking-fault energy of the system
+####################################
+# SIMULATION DONE
+print "All done"
+All done
+print "Initial energy of atoms = ${Eo} eV"
+Initial energy of atoms = -234482.259789123 eV
+print "Final energy of atoms = ${Ef} eV"
+Final energy of atoms = -234312.094683612 eV
+print "Stacking-fault energy = ${SFE} mJ/m^2"
+Stacking-fault energy = 557.221297054184 mJ/m^2
+Total wall time: 0:00:11
