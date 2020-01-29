@@ -2,7 +2,7 @@
 # Modified Dec 2019 for generalised stacking faults
 
 # --------------------- INITIALIZAITION ---------------------
-read_restart ../../init/restart.opt
+read_restart restart.opt
 
 change_box all boundary p p s
 variable sca equal 16

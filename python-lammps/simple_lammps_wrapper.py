@@ -27,7 +27,7 @@ class Lammps :
         self.ready = False # Flag if class object has been correctly setup to run a lammps simulation
         self.error_msg = [] # Track error messages for this instance
         
-    def print_error(self): print("\n".join(self.error_msg))
+    def print_error(self): print("No errors.\n") if self.error_msg == [] else print("\n".join(["Errors:"]+self.error_msg))
 
     def input_loc(self): return self.work_dir+"/"+self.input_file
     def data_loc(self): return self.work_dir+"/"+self.data_file
@@ -81,7 +81,7 @@ class Lammps :
             return new_object
         
     @classmethod
-    def default_setup(cls,script,loc="."):
+    def default_setup(cls,script,loc=".",pot="NiAlCoCrMoTiWTa.set"):
         script_lib = {"sfe_setup":"/sfe_scripts/sfe_1.in",
                       "sfe_min":"/sfe_scripts/sfe_2.in",
                       "sfe_step":"/sfe_scripts/sfe_3_restart.in",
@@ -90,9 +90,14 @@ class Lammps :
                       "apbe_step":"/sfe_scripts/apbe_3_restart.in"}
         try:
             desired_file = sys.path[0]+"/lammps_scripts"+script_lib[script] if sys.path[0] != "" else "lammps_scripts"+script_lib[script]
-            input_file = loc + "/" + script_lib[script].split("/")[-1] if loc != "." else script_lib[script].split("/")[-1]
-            sp.call(" ".join(["mkdir","-p",loc,"&&","cp",desired_file,input_file]),shell=True,executable='/bin/bash')
-            new_object = cls.setup(input_file)
+            new_input_file = loc + "/" + script_lib[script].split("/")[-1] if loc != "." else script_lib[script].split("/")[-1]
+            sp.call(" ".join(["mkdir","-p",loc]),shell=True,executable='/bin/bash')
+            with open(desired_file,'r') as default_file:
+                default_content = default_file.read()
+                updated_content = default_content.replace(pot,sys.path[0]+"/potentials/"+pot) if sys.path[0] != "" else default_content.replace(pot,"potentials/"+pot)
+            with open(new_input_file,"w+") as write_file:
+                write_file.write(updated_content)
+            new_object = cls.setup(new_input_file)
             return new_object
         except KeyError: 
             new_object = cls()
