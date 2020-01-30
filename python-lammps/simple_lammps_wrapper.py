@@ -21,7 +21,7 @@ class Lammps :
     def __init__(self,input_file="",data_file=None) :
         self.input_file = input_file
         self.data_file = data_file
-        self.log_file="lammps.log"
+        self.log_file = input_file.replace(".in",".log")
         # When writing new functions be very careful about whether this should be prepended to the .in file, .log file, etc
         self.work_dir = "."
         self.ready = False # Flag if class object has been correctly setup to run a lammps simulation
@@ -106,12 +106,12 @@ class Lammps :
     
     # can initialise using a currently existing instance
     @classmethod
-    def update(cls,old_instance,name,update_dict={},new_data_file=None):
+    def based_on_setup(cls,old_instance,new_name,update_dict={},new_data_file=None,new_dir=False):
         # Check if old_instance is actually an instance of the class
         if isinstance(old_instance,Lammps):
             # Create new directory for this one
             old_work_dir = old_instance.work_dir
-            new_work_dir = old_work_dir+"/"+name
+            new_work_dir = old_work_dir if not new_dir else old_work_dir+"/"+new_name
             sp.call(["mkdir","-p",new_work_dir])
             # Check input file for references to "old" .data or potentials files
             # Also check for dict elements
@@ -135,7 +135,7 @@ class Lammps :
                             break # Make sure a found keyword in the file isn't double counted whilst searching the whole line
                     new_lines += [" ".join(words)+"\n"]
             # Write new input file
-            new_input_file = new_work_dir+"/"+old_instance.input_file
+            new_input_file = new_work_dir+"/"+new_name
             with open(new_input_file,"w+") as new_file:
                 new_file.writelines(new_lines)
             # Initialise new class instance
@@ -144,9 +144,8 @@ class Lammps :
             else:
                 new_mvd_data_file = new_data_file.split("/")[-1]
                 sp.call(["cp",new_data_file,new_work_dir+"/"+new_mvd_data_file])
-            new_instance = cls(input_file=old_instance.input_file,data_file=new_mvd_data_file)
+            new_instance = cls(input_file=new_name,data_file=new_mvd_data_file)
             new_instance.work_dir = new_work_dir
-            new_instance.log_file = old_instance.log_file
             new_instance.ready = True
             return new_instance                                
         
@@ -155,6 +154,29 @@ class Lammps :
     @classmethod
     def command(cls,cores,lammps_path = "lmp_mpi") :
         cls.lammps_cmd = "mpirun -n "+str(cores)+" "+lammps_path
+        
+    # Use this to update the .in file of a given object
+    def update(self,update_dict,new_input_name=None):
+        # Check input file for references to "old" .data or potentials files
+        # Also check for dict elements
+        # This code is a bit messy to deal with possibility of 2+ word key
+        new_lines = []
+        with open(self.input_loc(),'r') as old_file:
+            lines = old_file.readlines()
+            for line in lines:
+                words = line.split()
+                for j,_ in enumerate(words) :
+                    key = " ".join(words[:j+1])
+                    # check for user specified update keywords
+                    if key in update_dict:
+                        words = [key]+update_dict[key].split()
+                        break # Make sure a found keyword in the file isn't double counted whilst searching the whole line
+                new_lines += [" ".join(words)+"\n"]
+        # Write new input file
+        if new_input_name:
+            self.input_file = new_input_name
+        with open(self.input_loc(),"w+") as new_file:
+            new_file.writelines(new_lines)
         
     def read_log(self,thermo_style,np_out=True):
         # thermo_style is the list of strings which appear before the quantities to extract
