@@ -11,7 +11,7 @@ variable sca equal 16
 variable scb equal 28
 variable scc equal 10
 variable latparam1 equal 3.52
-variable x_displace equal -1*(${latparam1}/sqrt(6))
+variable x_displace equal ${latparam1}*sqrt(6)/2
 variable xdim equal ${latparam1}*sqrt(6)/2*${sca}
 variable ydim equal ${latparam1}*sqrt(2)/2*${scb}
 variable zmid equal ${latparam1}*sqrt(3)*${scc}

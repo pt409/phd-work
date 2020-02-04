@@ -3,7 +3,9 @@
 """
 Created on Tue Dec 10 12:28:16 2019
 
-@author: cdt1801
+Code is split into the main class (Lammps) and examples.
+
+@author: Pat Taylor (pt409)
 """
 
 import subprocess as sp
@@ -12,6 +14,8 @@ import sys
 import numpy as np
 from random import sample
 from mendeleev import element
+
+################################# CLASS #######################################
 
 class Lammps :
     
@@ -91,13 +95,15 @@ class Lammps :
         try:
             desired_file = sys.path[0]+"/lammps_scripts"+script_lib[script] if sys.path[0] != "" else "lammps_scripts"+script_lib[script]
             new_input_file = loc + "/" + script_lib[script].split("/")[-1] if loc != "." else script_lib[script].split("/")[-1]
-            sp.call(" ".join(["mkdir","-p",loc]),shell=True,executable='/bin/bash')
+            sp.call(["mkdir","-p",loc])
+            prefix = (loc.count("/")+1*(loc!="."))*"../" # Prefix for potentials location
             with open(desired_file,'r') as default_file:
                 default_content = default_file.read()
-                updated_content = default_content.replace(pot,sys.path[0]+"/potentials/"+pot) if sys.path[0] != "" else default_content.replace(pot,"potentials/"+pot)
+                updated_content = default_content.replace(pot,sys.path[0]+"/potentials/"+pot) if sys.path[0] != "" else default_content.replace(pot,prefix+"potentials/"+pot)
             with open(new_input_file,"w+") as write_file:
                 write_file.write(updated_content)
             new_object = cls.setup(new_input_file)
+            new_object.work_dir = loc
             return new_object
         except KeyError: 
             new_object = cls()
@@ -156,7 +162,7 @@ class Lammps :
         cls.lammps_cmd = "mpirun -n "+str(cores)+" "+lammps_path
         
     # Use this to update the .in file of a given object
-    def update(self,update_dict,new_input_name=None):
+    def update(self,update_dict,replace_dict={},new_input_name=None):
         # Check input file for references to "old" .data or potentials files
         # Also check for dict elements
         # This code is a bit messy to deal with possibility of 2+ word key
@@ -164,6 +170,10 @@ class Lammps :
         with open(self.input_loc(),'r') as old_file:
             lines = old_file.readlines()
             for line in lines:
+                # Check for simple replacements
+                for replace_key in replace_dict:
+                    line = line.replace(replace_key,replace_dict[replace_key])
+                # Check for updates to lammps keywords
                 words = line.split()
                 for j,_ in enumerate(words) :
                     key = " ".join(words[:j+1])
@@ -269,3 +279,38 @@ class Lammps :
                 if line_count > masses_start and line_count < (masses_start + M_types):
                     continue # Con't write the original masses at all
                 data_out.write(line)
+
+################################ EXAMPLES #####################################
+                
+def alloy_md_properties(composition,structure,name,*args):
+    alloy_elements = " ".join(sorted(composition.keys()))
+    output_properties = {}
+    def sfe_apbe_protocol(var):
+        sfe_dir = name+"/"+var
+        sp.call(["mkdir","-p",sfe_dir])
+        sfe_setup = Lammps.default_setup(var+"_setup",loc=sfe_dir)
+        sfe_setup.run() # This produces a datafile elemental.data
+        sfe_min = Lammps.default_setup(var+"_min",loc=sfe_dir)
+        sfe_min.data_file = "elemental.data"
+        sfe_min.alloyify(composition.copy(),composition.copy())
+        sfe_min.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Ni":alloy_elements})
+        sfe_min.run()
+        # Find the maximum displacement that will return cell to original equilibrium
+        with open(sfe_min.log_loc()) as read_file:
+            f = read_file.readlines()
+            x_tot = float(f[-17].split()[-2])
+        a = x_tot*2/np.sqrt(6) # Lattice parameter
+        # Step refers to shift in upper part of supercell to calculate intrinsic stacking fault
+        sfe_step = Lammps.default_setup(var+"_step",loc=sfe_dir)
+        sfe_step.update(update_dict={"read_data":"alloyified_elemental.data","variable latparam1 equal":str(a)},replace_dict={"Ni Ni":alloy_elements})
+        sfe_step.run()
+        with open(sfe_step.log_loc()) as read_file:
+            f = read_file.readlines()
+            E = float(f[-2].split()[-2])
+        return E
+    if "sfe" in args:
+        output_properties["sfe"] = sfe_apbe_protocol("sfe")
+    if "apbe" in args:
+        output_properties["apbe"] = sfe_apbe_protocol("apbe")
+    
+    return tuple(output_properties[key] for key in args)
