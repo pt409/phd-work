@@ -26,6 +26,12 @@ steps = 40
 x = 0.0
 alloy_comp = {"Ni":0.5219,"Cr":0.271,"Co":0.1181,"Al":0.0369,"Ta":0.0042,"W":0.0153,"Ti":0.0036,"Mo":0.029} # AM3 gamma matrix
 alloy_comp = {"Ni":0.5493,"Cr":0.2558,"Co":0.0921,"Al":0.0284,"Ta":0.0029,"W":0.0423,"Ti":0.0025,"Mo":0.0267} # MC2 gamma matrix
+alloy_comp = {"Ni":0.608,"Cr":0.236,"Co":0.082,"Al":0.033,"Ta":0.014,"W":0.02,"Ti":0.007} # Alloy 454 gamma matrix
+alloy_comp = {"Ni":0.596,"Cr":0.255,"Co":0.086,"Al":0.031,"Ta":0.001,"W":0.025,"Ti":0.006} # CMSX-2 gamma matrix
+alloy_comp = {"Ni":0.59,"Cr":0.155,"Co":0.136,"Al":0.039,"Ta":0.006,"W":0.074} # TMS-1 gamma matrix
+alloy_comp = {"Ni":0.558,"Cr":0.265,"Co":0.096,"Al":0.034,"Ta":0.007,"W":0.035,"Ti":0.005} # PWA 1480 gamma matrix
+alloy_comp = {"Ni":0.54,"Cr":0.261,"Co":0.111,"Al":0.03,"Ta":0.007,"W":0.023,"Ti":0.004,"Mo":0.025} # AM1 gamma matrix
+alloy_comp = {"Ni":0.5491,"Cr":0.3129,"Co":0.0762,"Al":0.0321,"Ta":0.0023,"W":0.0145,"Mo":0.0091} # STAL-15 gamma matrix
 
 alloy_elements = " ".join(sorted(alloy_comp.keys()))
 

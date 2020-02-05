@@ -1,0 +1,25 @@
+# --------------------- INITIALIZAITION ---------------------
+clear
+units		metal
+dimension	3
+boundary	p p p
+atom_style	atomic
+variable sc equal 10
+variable latparam1 equal 3.52
+variable xdim equal ${latparam1}*${sc}
+variable ydim equal ${latparam1}*${sc}
+variable zdim equal ${latparam1}*${sc}
+# --------------------- ATOM DEFINITION ---------------------
+lattice		fcc ${latparam1}
+region		1 block -.001 ${xdim} -.001 ${ydim} -.001 ${zdim} units box
+region		whole block 0 ${xdim} 0 ${ydim} 0 ${zdim} units box
+#the -.001 in the -x and -y and lower limit of region 1 are only to overcome a simple numerical issue but can be considered 0
+create_box 	2 whole
+lattice fcc ${latparam1} orient x 1 0 0 orient y 0 1 0 orient z 0 0 1
+create_atoms	1 region basis 1 2 basis 2 1 basis 3 1 basis 4 1
+# --------------------- FORCE FIELDS ---------------------
+pair_style	eam/alloy
+pair_coeff * * NiAlCoCrMoTiWTa.set Ni Al
+#pair_coeff * * Ni99.eam.alloy Ni Al
+# --------------------- SETTINGS ---------------------
+write_data elemental.data

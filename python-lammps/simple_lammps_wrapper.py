@@ -91,7 +91,9 @@ class Lammps :
                       "sfe_step":"/sfe_scripts/sfe_3_restart.in",
                       "apbe_setup":"/sfe_scripts/apbe_1.in",
                       "apbe_min":"/sfe_scripts/apbe_2.in",
-                      "apbe_step":"/sfe_scripts/apbe_3_restart.in"}
+                      "apbe_step":"/sfe_scripts/apbe_3_restart.in",
+                      "md_setup":"/md_scripts/md_1.in",
+                      "md_run":"/md_scripts/md_2.in"}
         try:
             desired_file = sys.path[0]+"/lammps_scripts"+script_lib[script] if sys.path[0] != "" else "lammps_scripts"+script_lib[script]
             new_input_file = loc + "/" + script_lib[script].split("/")[-1] if loc != "." else script_lib[script].split("/")[-1]
@@ -282,9 +284,10 @@ class Lammps :
 
 ################################ EXAMPLES #####################################
                 
-def alloy_md_properties(composition,structure,name,*args):
+def alloy_md_properties(composition,name,*args):
     alloy_elements = " ".join(sorted(composition.keys()))
     output_properties = {}
+    # sfe/apbe calculations (very similar)
     def sfe_apbe_protocol(var):
         sfe_dir = name+"/"+var
         sp.call(["mkdir","-p",sfe_dir])
@@ -293,7 +296,7 @@ def alloy_md_properties(composition,structure,name,*args):
         sfe_min = Lammps.default_setup(var+"_min",loc=sfe_dir)
         sfe_min.data_file = "elemental.data"
         sfe_min.alloyify(composition.copy(),composition.copy())
-        sfe_min.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Ni":alloy_elements})
+        sfe_min.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Ni":alloy_elements,"Ni Al Ni Al":alloy_elements})
         sfe_min.run()
         # Find the maximum displacement that will return cell to original equilibrium
         with open(sfe_min.log_loc()) as read_file:
@@ -302,7 +305,7 @@ def alloy_md_properties(composition,structure,name,*args):
         a = x_tot*2/np.sqrt(6) # Lattice parameter
         # Step refers to shift in upper part of supercell to calculate intrinsic stacking fault
         sfe_step = Lammps.default_setup(var+"_step",loc=sfe_dir)
-        sfe_step.update(update_dict={"read_data":"alloyified_elemental.data","variable latparam1 equal":str(a)},replace_dict={"Ni Ni":alloy_elements})
+        sfe_step.update(update_dict={"read_data":"alloyified_elemental.data","variable latparam1 equal":str(a)},replace_dict={"Ni Ni":alloy_elements,"Ni Al Ni Al":alloy_elements})
         sfe_step.run()
         with open(sfe_step.log_loc()) as read_file:
             f = read_file.readlines()
@@ -313,4 +316,21 @@ def alloy_md_properties(composition,structure,name,*args):
     if "apbe" in args:
         output_properties["apbe"] = sfe_apbe_protocol("apbe")
     
+    # md calculations for basic properties i.e. density/lattice parameters
+    if "density" in args or "lattice" in args:
+        md_dir = name+"/md"
+        sp.call(["mkdir","-p",md_dir])
+        md_setup = Lammps.default_setup("md_setup",loc=md_dir)
+        md_setup.run()
+        md_run = Lammps.default_setup("md_run",loc=md_dir)
+        md_run.data_file = "elemental.data"
+        md_run.alloyify(composition.copy(),composition.copy())
+        md_run.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Al":alloy_elements})
+        md_run.run()
+        dump_values = md_run.read_log(['Density', 'Temp', 'Press', 'Cella', 'Cellb', 'Cellc'])
+        density = np.mean(dump_values[1,2:])
+        lat_param = np.mean(dump_values[4:,2:])
+        output_properties["density"] = density
+        output_properties["lattice"] = lat_param
+        
     return tuple(output_properties[key] for key in args)
