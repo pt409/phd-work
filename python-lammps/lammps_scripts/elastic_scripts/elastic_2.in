@@ -19,7 +19,7 @@ pair_coeff * * NiAlCoCrMoTiWTa.set Ni Al
 change_box     all x delta 0 ${delta} remap units box
 
 timestep       0.001
-fix            1 mobile npt temp ${temp} ${temp} 0.001
+fix            1 mobile nvt temp ${temp} ${temp} 0.001
 velocity       mobile create ${temp} 1551282502 mom yes rot yes dist gaussian
 thermo_style   custom temp pxx pyy pzz pxy pxz pyz
 thermo_modify  line multi

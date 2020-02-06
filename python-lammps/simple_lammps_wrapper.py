@@ -334,7 +334,8 @@ def alloy_md_properties(composition,name,*args):
         md_run.run()
         dump_values = md_run.read_log(['Density', 'Temp', 'Press', 'Cella', 'Cellb', 'Cellc'])
         density = np.mean(dump_values[1,2:])
-        lat_param = np.mean(dump_values[4:,2:])/cubic_sc
+        cell_length = np.mean(dump_values[4:,2:])
+        lat_param = cell_length/cubic_sc
         output_properties["density"] = density
         output_properties["lattice"] = lat_param
     
@@ -345,7 +346,7 @@ def alloy_md_properties(composition,name,*args):
         elastic_setup = Lammps.default_setup("elastic_setup",loc=elastic_dir)
         if "density" in args or "lattice" in args: 
             elastic_setup.update(update_dict={"variable latparam1 equal":str(lat_param)})
-        else: lat_param = 3.52 # default value
+        else: cell_length = 3.52*cubic_sc # default value
         elastic_setup.run()
         # Do NVT simulations for the undisplaced supercell
         elastic_equilib = Lammps.default_setup("elastic_run",loc=elastic_dir)
@@ -363,19 +364,20 @@ def alloy_md_properties(composition,name,*args):
         all_directions = ["x","y","z","xy","xz","yz"]
         for direction in directions:
             for displacement in [-up,up]:
-                actual_disp = str(displacement*lat_param)
-                current_run = Lammps.based_on_setup(elastic_equilib,direction+actual_disp,update_dict={"variable delta equal":actual_disp,"change_box all": direction+" delta 0 ${delta} remap units box"})
+                actual_disp = str(displacement*cell_length)
+                change_box_cmd = direction+" delta 0 ${delta} remap units box" if direction in ["x","y","z"] else direction+" delta ${delta} remap units box"
+                current_run = Lammps.based_on_setup(elastic_equilib,direction+str(up)+".in",update_dict={"variable delta equal":actual_disp,"change_box all": change_box_cmd})
                 current_run.run()
-                dump_values = elastic_equilib.read_log(['Pxx','Pyy','Pzz','Pxy','Pxz','Pyz'])
+                dump_values = current_run.read_log(['Pxx','Pyy','Pzz','Pxy','Pxz','Pyz'])
                 Pij = np.mean(dump_values[1:],axis=1)
                 a = all_directions.index(direction) # Voigt index
                 if a < 3: 
-                    C11 += Pij[a]/6*displacement
-                    C12 += Pij[(a+1)%3]/12*displacement + Pij[(a+2)%3]/12*displacement
+                    C11 -= Pij[a]/(6*displacement)
+                    C12 -= Pij[(a+1)%3]/(12*displacement) + Pij[(a+2)%3]/(12*displacement)
                 if a >= 3:
-                    C44 += Pij[a]/6*displacement
-        if "C11" in args: output_properties["C11"] = C11
-        if "C12" in args: output_properties["C12"] = C12
-        if "C44" in args: output_properties["C44"] = C44
+                    C44 -= Pij[a]/(6*displacement)
+        if "C11" in args: output_properties["C11"] = C11*1e-4
+        if "C12" in args: output_properties["C12"] = C12*1e-4
+        if "C44" in args: output_properties["C44"] = C44*1e-4
         
     return tuple(output_properties[key] for key in args)

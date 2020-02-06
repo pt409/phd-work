@@ -12,7 +12,7 @@ pair_style	eam/alloy
 pair_coeff * * NiAlCoCrMoTiWTa.set Ni Al
 #pair_coeff * * Ni99.eam.alloy Ni Al
 # --------------------- SETTINGS ---------------------
-fix            1 mobile npt temp ${temp} ${temp} 0.001
+fix            1 mobile nvt temp ${temp} ${temp} 0.001
 change_box     all x delta 0 ${delta} remap units box
 
 thermo_style   custom temp pxx pyy pzz pxy pxz pyz
