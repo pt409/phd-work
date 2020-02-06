@@ -5,9 +5,9 @@ dimension	3
 boundary	p p p
 atom_style	atomic
 variable temp equal 300
-variable press equal 0
 variable equilib_steps equal 100
 variable accumul_steps equal 100
+variable delta equal 0.0
 # --------------------- ATOM DEFINITION ---------------------
 read_data elemental.data
 group	mobile union all
@@ -16,10 +16,12 @@ pair_style	eam/alloy
 pair_coeff * * NiAlCoCrMoTiWTa.set Ni Al
 #pair_coeff * * Ni99.eam.alloy Ni Al
 # --------------------- SETTINGS ---------------------
+change_box     all x delta 0 ${delta} remap units box
+
 timestep       0.001
-fix            1 mobile npt temp ${temp} ${temp} 0.001 iso ${press} ${press} 0.1
+fix            1 mobile npt temp ${temp} ${temp} 0.001
 velocity       mobile create ${temp} 1551282502 mom yes rot yes dist gaussian
-thermo_style   custom vol density temp press cella cellb cellc cellalpha cellbeta cellgamma
+thermo_style   custom temp pxx pyy pzz pxy pxz pyz
 thermo_modify  line multi
 thermo         0
 thermo_modify  flush yes
@@ -27,4 +29,4 @@ run            ${equilib_steps}
 thermo	       1
 run 	       ${accumul_steps}
 
-write_restart  md.opt
+write_restart  elastic.opt

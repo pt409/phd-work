@@ -93,7 +93,10 @@ class Lammps :
                       "apbe_min":"/sfe_scripts/apbe_2.in",
                       "apbe_step":"/sfe_scripts/apbe_3_restart.in",
                       "md_setup":"/md_scripts/md_1.in",
-                      "md_run":"/md_scripts/md_2.in"}
+                      "md_run":"/md_scripts/md_2.in",
+                      "elastic_setup":"/elastic_scripts/elastic_1.in",
+                      "elastic_run":"/elastic_scripts/elastic_2.in",
+                      "elastic_deform":"/elastic_scripts/elastic_3.in"}
         try:
             desired_file = sys.path[0]+"/lammps_scripts"+script_lib[script] if sys.path[0] != "" else "lammps_scripts"+script_lib[script]
             new_input_file = loc + "/" + script_lib[script].split("/")[-1] if loc != "." else script_lib[script].split("/")[-1]
@@ -287,6 +290,8 @@ class Lammps :
 def alloy_md_properties(composition,name,*args):
     alloy_elements = " ".join(sorted(composition.keys()))
     output_properties = {}
+    cubic_sc = 10
+    up = 0.002 # Fractional displacements used to calculate lattice params
     # sfe/apbe calculations (very similar)
     def sfe_apbe_protocol(var):
         sfe_dir = name+"/"+var
@@ -329,8 +334,48 @@ def alloy_md_properties(composition,name,*args):
         md_run.run()
         dump_values = md_run.read_log(['Density', 'Temp', 'Press', 'Cella', 'Cellb', 'Cellc'])
         density = np.mean(dump_values[1,2:])
-        lat_param = np.mean(dump_values[4:,2:])
+        lat_param = np.mean(dump_values[4:,2:])/cubic_sc
         output_properties["density"] = density
         output_properties["lattice"] = lat_param
+    
+    # Elastic constant calculations    
+    if "C11" in args or "C12" in args or "C44" in args:
+        elastic_dir = name+"/elastic"
+        sp.call(["mkdir","-p",elastic_dir])
+        elastic_setup = Lammps.default_setup("elastic_setup",loc=elastic_dir)
+        if "density" in args or "lattice" in args: 
+            elastic_setup.update(update_dict={"variable latparam1 equal":str(lat_param)})
+        else: lat_param = 3.52 # default value
+        elastic_setup.run()
+        # Do NVT simulations for the undisplaced supercell
+        elastic_equilib = Lammps.default_setup("elastic_run",loc=elastic_dir)
+        elastic_equilib.data_file = "elemental.data"
+        elastic_equilib.alloyify(composition.copy(),composition.copy())
+        elastic_equilib.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Al":alloy_elements})
+        #elastic_equilib.run()
+        #dump_values = elastic_equilib.read_log(['Pxx','Pyy','Pzz','Pxy','Pxz','Pyz'])
+        #Pij_mean = np.mean(dump_values[1:],axis=1)
+        # Now do displaced cell calculations
+        directions = []
+        C11 = 0 ; C12 = 0 ; C44 = 0
+        if "C11" in args or "C12" in args: directions += ["x","y","z"]
+        if "C44" in args: directions += ["xy","xz","yz"]
+        all_directions = ["x","y","z","xy","xz","yz"]
+        for direction in directions:
+            for displacement in [-up,up]:
+                actual_disp = str(displacement*lat_param)
+                current_run = Lammps.based_on_setup(elastic_equilib,direction+actual_disp,update_dict={"variable delta equal":actual_disp,"change_box all": direction+" delta 0 ${delta} remap units box"})
+                current_run.run()
+                dump_values = elastic_equilib.read_log(['Pxx','Pyy','Pzz','Pxy','Pxz','Pyz'])
+                Pij = np.mean(dump_values[1:],axis=1)
+                a = all_directions.index(direction) # Voigt index
+                if a < 3: 
+                    C11 += Pij[a]/6*displacement
+                    C12 += Pij[(a+1)%3]/12*displacement + Pij[(a+2)%3]/12*displacement
+                if a >= 3:
+                    C44 += Pij[a]/6*displacement
+        if "C11" in args: output_properties["C11"] = C11
+        if "C12" in args: output_properties["C12"] = C12
+        if "C44" in args: output_properties["C44"] = C44
         
     return tuple(output_properties[key] for key in args)

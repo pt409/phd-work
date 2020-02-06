@@ -11,7 +11,7 @@ variable ydim equal ${latparam1}*${sc}
 variable zdim equal ${latparam1}*${sc}
 # --------------------- ATOM DEFINITION ---------------------
 lattice		fcc ${latparam1}
-region		whole block 0 ${xdim} 0 ${ydim} 0 ${zdim} units box
+region		whole prism 0 ${xdim} 0 ${ydim} 0 ${zdim} 0 0 0 units box
 create_box 	2 whole
 lattice fcc ${latparam1} orient x 1 0 0 orient y 0 1 0 orient z 0 0 1
 create_atoms	1 region whole basis 1 2 basis 2 1 basis 3 1 basis 4 1
@@ -21,3 +21,4 @@ pair_coeff * * NiAlCoCrMoTiWTa.set Ni Al
 #pair_coeff * * Ni99.eam.alloy Ni Al
 # --------------------- SETTINGS ---------------------
 write_data elemental.data
+
