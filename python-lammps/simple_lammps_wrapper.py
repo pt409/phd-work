@@ -288,7 +288,9 @@ class Lammps :
 ################################ EXAMPLES #####################################
                 
 def alloy_md_properties(composition,name,*args):
-    alloy_elements = " ".join(sorted(composition.keys()))
+    overall_comp = {}
+    for sub_comp in composition: overall_comp.update(sub_comp)
+    alloy_elements = " ".join(sorted(overall_comp.keys()))
     output_properties = {}
     cubic_sc = 10
     up = 0.002 # Fractional displacements used to calculate lattice params
@@ -300,7 +302,10 @@ def alloy_md_properties(composition,name,*args):
         sfe_setup.run() # This produces a datafile elemental.data
         sfe_min = Lammps.default_setup(var+"_min",loc=sfe_dir)
         sfe_min.data_file = "elemental.data"
-        sfe_min.alloyify(composition.copy(),composition.copy())
+        if var == "sfe": 
+            sfe_min.alloyify(composition[0].copy(),composition[-1].copy())
+        elif var == "apbe":
+            sfe_min.alloyify(composition[0].copy(),composition[-1].copy(),composition[0].copy(),composition[-1].copy())
         sfe_min.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Ni":alloy_elements,"Ni Al Ni Al":alloy_elements})
         sfe_min.run()
         # Find the maximum displacement that will return cell to original equilibrium
@@ -329,7 +334,7 @@ def alloy_md_properties(composition,name,*args):
         md_setup.run()
         md_run = Lammps.default_setup("md_run",loc=md_dir)
         md_run.data_file = "elemental.data"
-        md_run.alloyify(composition.copy(),composition.copy())
+        md_run.alloyify(composition[0].copy(),composition[-1].copy())
         md_run.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Al":alloy_elements})
         md_run.run()
         dump_values = md_run.read_log(['Density', 'Temp', 'Press', 'Cella', 'Cellb', 'Cellc'])
@@ -351,7 +356,7 @@ def alloy_md_properties(composition,name,*args):
         # Do NVT simulations for the undisplaced supercell
         elastic_equilib = Lammps.default_setup("elastic_run",loc=elastic_dir)
         elastic_equilib.data_file = "elemental.data"
-        elastic_equilib.alloyify(composition.copy(),composition.copy())
+        elastic_equilib.alloyify(composition[0].copy(),composition[-1].copy())
         elastic_equilib.update(update_dict={"read_data":"alloyified_elemental.data"},replace_dict={"Ni Al":alloy_elements})
         #elastic_equilib.run()
         #dump_values = elastic_equilib.read_log(['Pxx','Pyy','Pzz','Pxy','Pxz','Pyz'])
