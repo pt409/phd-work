@@ -32,6 +32,7 @@ alloy_comp = {"Ni":0.59,"Cr":0.155,"Co":0.136,"Al":0.039,"Ta":0.006,"W":0.074} #
 alloy_comp = {"Ni":0.558,"Cr":0.265,"Co":0.096,"Al":0.034,"Ta":0.007,"W":0.035,"Ti":0.005} # PWA 1480 gamma matrix
 alloy_comp = {"Ni":0.54,"Cr":0.261,"Co":0.111,"Al":0.03,"Ta":0.007,"W":0.023,"Ti":0.004,"Mo":0.025} # AM1 gamma matrix
 alloy_comp = {"Ni":0.5491,"Cr":0.3129,"Co":0.0762,"Al":0.0321,"Ta":0.0023,"W":0.0145,"Mo":0.0091} # STAL-15 gamma matrix
+alloy_comp = {"Ni":1.00}
 
 alloy_elements = " ".join(sorted(alloy_comp.keys()))
 
