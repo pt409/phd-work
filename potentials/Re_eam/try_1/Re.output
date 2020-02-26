@@ -1,0 +1,45 @@
+-------------------------------------------------------
+Potential parameters being optimized (#dof=6):
+   elemental EAM potential[EAM].V[functionSum].V_1[user-function].A: 1.99411
+   elemental EAM potential[EAM].V[functionSum].V_1[user-function].alpha: 7.75245
+   elemental EAM potential[EAM].V[functionSum].V_2[user-function].B: 2.54106
+   elemental EAM potential[EAM].V[functionSum].V_2[user-function].beta: 4.70899
+   elemental EAM potential[EAM].F[user-function].F0: -2.49901 [-6:0]
+   elemental EAM potential[EAM].F[user-function].eta: -0.462922 [-2:2]
+-------------------------------------------------------
+Fitting process complete.
+-------------------------------------------------------
+Computing structure properties
+Structure 'hcp':
+   total-energy: -14.5736 eV
+   atomic-energy: -7.2868 eV/atom (target: -8.03 eV/atom) Abs. weight: 0.00337678; Tolerance: 0.01; Weighted residual: 18.6515
+   total-volume: 29.3914 A^3
+   atomic-volume: 14.6957 A^3/atom
+   bulk-modulus: 350.304 GPa (target: 370 GPa) Abs. weight: 0.0675356; Tolerance: 2; Weighted residual: 6.54977
+   C11: 623.096 GPa (target: 0 GPa) Abs. weight: 0; Tolerance: 2; Weighted residual: 0
+   C12: 245.437 GPa (target: 0 GPa) Abs. weight: 0; Tolerance: 2; Weighted residual: 0
+   C13: 183.306 GPa (target: 0 GPa) Abs. weight: 0; Tolerance: 2; Weighted residual: 0
+   C33: 682.467 GPa (target: 0 GPa) Abs. weight: 0; Tolerance: 2; Weighted residual: 0
+   C44: 126.66 GPa (target: 0 GPa) Abs. weight: 0; Tolerance: 2; Weighted residual: 0
+   C66: 188.826 GPa (target: 0 GPa) Abs. weight: 0; Tolerance: 2; Weighted residual: 0
+   lattice-parameter: 2.74929 A (target: 2.761 A) Abs. weight: 0.337678; Tolerance: 0.005; Weighted residual: 1.85304 (relaxed)
+   ca-ratio: 1.63316 (target: 1.6139) Abs. weight: 0.337678; Tolerance: 1; Weighted residual: 0.000125296 (relaxed)
+Structure 'hcp-static':
+   total-energy: -14.5736 eV
+   atomic-energy: -7.2868 eV/atom (target: 0 eV/atom) Abs. weight: 0; Tolerance: 0.01; Weighted residual: 0
+   total-volume: 29.3914 A^3
+   atomic-volume: 14.6957 A^3/atom
+Writing structure 'hcp-static' to POSCAR.static-structure
+Structure 'vac':
+   total-energy: -919.259 eV (target: 0 eV) Abs. weight: 0; Tolerance: 0.2; Weighted residual: 0
+   atomic-energy: -7.23826 eV/atom
+   total-volume: 1881.05 A^3
+   atomic-volume: 14.8114 A^3/atom
+Writing structure 'vac' to POSCAR.defect-structure
+-------------------------------------------------------
+Computing derived properties
+   voigt_shear_mod: 176.202 GPa (target: 178 GPa) Abs. weight: 0.0746269; Tolerance: 2; Weighted residual: 0.0602854
+   vacancy-energy: 6.16431 eV (target: 5 eV) Abs. weight: 0.149254; Tolerance: 0.2; Weighted residual: 5.05826
+-------------------------------------------------------
+-------------------------------------------------------
+
