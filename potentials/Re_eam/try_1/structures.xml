@@ -1,0 +1,64 @@
+<group>
+
+  <hcp-lattice id="hcp" relative-weight="50">
+    <atom-type>Re</atom-type>
+    <lattice-parameter>2.761</lattice-parameter>
+    <ca-ratio>1.6139</ca-ratio>
+    <relax-dof>
+      <atom-coordinates relax="false"/>
+      <lattice-parameter reset="false" />
+      <ca-ratio reset="false"/>
+    </relax-dof>
+    <properties>
+      <atomic-energy fit="true" target="-8.03" relative-weight="1"/>
+      <lattice-parameter fit="true" target="2.761" relative-weight="100"/>
+      <ca-ratio fit="true" target="1.6139" relative-weight="100"/>
+      <bulk-modulus fit="true" target="370.0" relative-weight="20"/>
+      <!--<C11 target="613" relative-weight="0.1"/>
+      <C12 target="270" relative-weight="0.1"/>
+      <C33 target="683" relative-weight="0.1"/>
+      <C13 target="206" relative-weight="0.1"/>
+      <C44 target="163" relative-weight="0.1"/>-->
+      <C11/><C12/><C33/><C13/><C44/>
+      <C66/>
+    </properties>
+  </hcp-lattice>
+
+  <hcp-lattice id="hcp-static">
+    <atom-type>Re</atom-type>
+    <lattice-parameter>2.761</lattice-parameter>
+    <ca-ratio>1.6139</ca-ratio>
+    <output file="POSCAR.static-structure" format="poscar"/>
+    <properties>
+      <lattice-parameter equalto="hcp.lattice-parameter"/>
+      <ca-ratio equalto="hcp.ca-ratio"/>
+      <atomic-energy/>
+    </properties>
+  </hcp-lattice>
+
+  <point-defect id="vac">
+    <atom-type-A>Re</atom-type-A>
+    <lattice-type>hcp</lattice-type>
+    <cell-size>4</cell-size>
+    <lattice-parameter>2.761</lattice-parameter>
+    <ca-ratio>1.6139</ca-ratio>
+    <output file="POSCAR.defect-structure" format="poscar"/>
+    <defects>
+      <vacancy index="1" />
+    </defects>
+    <relax-dof>
+	<atom-coordinates reset="true"/>
+    </relax-dof>
+    <properties>
+      <atomic-energy/>
+      <lattice-parameter equalto="hcp.lattice-parameter"/>
+      <ca-ratio equalto="hcp.ca-ratio"/>
+    </properties>
+  </point-defect>
+
+  <derived-property id="voigt_shear_mod" unit="GPa" fit="true" target="178.0" relative-weight="5"
+                        equation="([hcp.C11] + [hcp.C12] + 2 * [hcp.C33] - 4 * [hcp.C13] + 12 * [hcp.C44] + 12 * [hcp.C66])/30"/>
+  <derived-property id="vacancy-energy" unit="eV" fit="true" target="5.00" relative-weight="10"
+                        equation="[vac.total-energy] - 127*[hcp-static.atomic-energy]"/>
+
+</group>

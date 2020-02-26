@@ -6,7 +6,7 @@
   <verbosity>medium</verbosity>
   
   <fitting>
-    <BFGS conv-threshold='1e-5' max-iter='40' />
+    <BFGS conv-threshold='1e-4' max-iter='85' />
   </fitting>
   
   <atom-types>

@@ -1,12 +1,44 @@
-Property	Element			
-	Re	Ru	Hf	Nb
-structure	hcp	hcp	hcp	
-Lattice constant	2.761	2.706	3.196	
-c/a ratio	1.6139	1.5824	1.5804	-
-Voigt avg shear mod	178	173		
-Elastic anisotropy	-	-	-	
-vac formation energy	5.00	3.64	1.72	
-^ Note	Purushotham and Gopi Krishna (2010)	Shankar Narayana et al (2000)	Shankar Narayana et al (2000)	
-cohesive energy	8.03	6.74	6.44	7.57
-bulk modulus	370	220		
-pressure (derivatives)				
+Property,Element,,,
+,Re,Ru,Hf,Nb
+structure,hcp,hcp,hcp,
+Lattice constant,2.761,2.706,3.196,
+c/a ratio,1.6139,1.5824,1.5804,-
+Voigt avg shear mod,178,173,,
+Elastic anisotropy,-,-,-,
+vac formation energy,5,3.64,1.72,
+^ Note,Purushotham and Gopi Krishna (2010),Shankar Narayana et al (2000),Shankar Narayana et al (2000),
+cohesive energy,8.03,6.74,6.44,7.57
+bulk modulus,370,220,,
+pressure derivative,(derivatives),,,
+Equilibrium electron density (from Castep),56.2478799145,,,
+C11,613,576,,
+C12,270,187,,
+C33,683,641,,
+C13,206,167,,
+C44,163,189,,
+C66,[160],[189],,
+,,,,
+Derived property:,,,,
+f_e,2.6012334868,2.2424174738,1.814869297,
+r_e,2.7395209607987,2.65040340147756,3.1277548693857,
+rho_e,90.324416,39.0621863425926,,
+,,,,
+,,,,
+,,,,
+Fitted parameter:,,,,
+A,1.99411,1.0162,,
+B,2.54106,1.41984,,
+alpha,7.75245,9.65767,,
+beta,2.54106,5.31359,,
+F0,-2.49901,-3.44317,,
+eta,-0.462922,0.26838,,
+,,,,
+Other parameters:,,,,
+F1,0,0,,
+F2,0.255734,0.121224,,
+F3,0.232779,-0.0751785,,
+Fn0,-2.49247,-3.44019,,
+Fn1,-0.0785679,-0.0352254,,
+Fn2,-0.26045,0.112027,,
+Fn3,-2.15345,-3.29294,,
+Fe,-2.49905,-3.44318,,
