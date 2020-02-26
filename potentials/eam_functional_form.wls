@@ -314,6 +314,10 @@
 
 (* ::Input:: *)
 (*paramsRe=Join[N[constraints/.{Subscript[F,0]->-2.49901,\[Eta]->-0.462922}],{Subscript[F,0]->-2.49901,\[Eta]->-0.462922},{A->1.99411,B->2.54106,\[Alpha]->7.75245,\[Beta]->2.54106,fe->2.601233487,re->2.739520961,\[Rho]e->90.324416,\[Rho]s->90.324416,\[Kappa]->0.5,\[Lambda]->1.0}];*)
+(*paramsRu=Join[N[constraints/.{Subscript[F,0]->-2.13854,\[Eta]->-0.0867711}],{Subscript[F,0]->-2.13854,\[Eta]->-0.0867711},{A->1.5815,B->2.13726,\[Alpha]->7.58578,\[Beta]->5.11809,fe->2.2424174738,re->2.6504034015,\[Rho]e->39.0621863426,\[Rho]s->39.0621863426,\[Kappa]->0.5,\[Lambda]->1.0}]*)
+
+
+(* ::Input:: *)
 (*paramsMo={re->2.728100,fe->2.723710,\[Rho]e->29.354065,\[Rho]s->29.354065,\[Alpha]->8.393531,\[Beta]->4.476550,A->0.708787,B->1.120373,\[Kappa]->0.137640,\[Lambda]->0.275280,Subscript[Fn,0]->-2.534992,Subscript[Fn,1]->-0.059605,Subscript[Fn,2]->0.193065,Subscript[Fn,3]->-2.282322,Subscript[F,0]->-2.54,Subscript[F,1]->0.0,Subscript[F,2]->0.200269,Subscript[F,3]->-0.148770,\[Eta]->0.391750,Fe->-2.539945};*)
 
 
@@ -322,17 +326,17 @@
 
 
 (* ::Input:: *)
-(*Plot[{\[Phi][r]/.paramsRe,\[Phi][r]/.paramsMo},{r,2.0,6.5},*)
+(*Plot[{\[Phi][r]/.paramsRe,\[Phi][r]/.paramsRu,\[Phi][r]/.paramsMo},{r,2.0,6.5},*)
 (*AxesLabel->{r,"\!\(\*SubscriptBox[\(\[Phi]\), \(AA\)]\)(r) (eV)"},*)
-(*PlotLabels->Placed[{"Re","Mo"},Below],*)
-(*PlotStyle->{"",Dashed}]*)
+(*PlotLabels->Placed[{"Re","Ru","Mo"},Below],*)
+(*PlotStyle->{"","",Dashed}]*)
 
 
 (* ::Input:: *)
-(*Plot[{\[Rho]i[r]/.paramsRe,\[Rho]i[r]/.paramsMo},{r,0.0,3.5},*)
+(*Plot[{\[Rho]i[r]/.paramsRe,\[Rho]i[r]/.paramsRu,\[Rho]i[r]/.paramsMo},{r,0.0,3.5},*)
 (*AxesLabel->{r,"f(r)"},*)
-(*PlotLabels->{Placed["Re",Above],Placed["Mo",Above]},*)
-(*PlotStyle->{"",Dashed},*)
+(*PlotLabels->{Placed["Re",Above],Placed["Ru",Above],Placed["Mo",Below]},*)
+(*PlotStyle->{"","",Dashed},*)
 (*PlotRange->Full]*)
 
 
@@ -341,7 +345,7 @@
 
 
 (* ::Input:: *)
-(*Plot[{F[\[Rho]]/.paramsRe,F[\[Rho]]/.paramsMo},{\[Rho],0.0,200},*)
+(*Plot[{F[\[Rho]]/.paramsRe,F[\[Rho]]/.paramsRu,F[\[Rho]]/.paramsMo},{\[Rho],0.0,200},*)
 (*AxesLabel->{\[Rho],"F(\[Rho]) (eV)"},*)
-(*PlotLabels->Placed[{"Re","Mo"},Below],*)
-(*PlotStyle->{"",Dashed}]*)
+(*PlotLabels->Placed[{"Re","Ru","Mo"},Below],*)
+(*PlotStyle->{"","",Dashed}]*)

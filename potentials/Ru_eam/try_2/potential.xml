@@ -1,0 +1,118 @@
+<eam id="elemental EAM potential" species-a="*" species-b="*">
+
+	<mapping>
+		<pair-interaction species-a="*" species-b="*" function="V" />
+		<electron-density species-a="*" species-b="*" function="rho" />
+		<embedding-energy species="*" function="F" />			
+	</mapping>
+
+	<functions>
+		<sum id="V">
+			<user-function id="V_1">
+				<input-var>r</input-var>
+				<expression>
+				  A * exp(- alpha * (r / re - 1))
+				</expression>
+				<derivative>
+				  - A * alpha * exp(- alpha * (r / re - 1)) / re
+				</derivative>
+				<param name="re">2.6504034015</param>
+				<param name="A">1.5815</param>
+				<param name="alpha">7.58578</param>
+				<fit-dof><A/><alpha/></fit-dof>
+				<screening>
+					<user-function id="V_1_screening">
+						<cutoff>6.60271</cutoff>
+						<input-var>r</input-var>
+						<expression>
+						  1 - 1/(1 + ((r - cutoff) / h)^4)
+						</expression>
+						<derivative>
+						  4 * h^4 * (r-cutoff)^3 / ((h^4 + (r-cutoff)^4)^2)
+						</derivative>
+						<param name="h">0.7</param>
+					</user-function>
+				</screening>
+			</user-function>
+			<user-function id="V_2">
+				<input-var>r</input-var>
+				<expression>
+				  - B * exp(- beta * (r / re - 1))
+				</expression>
+				<derivative>
+				  B * beta * exp(- beta * (r / re - 1)) / re
+				</derivative>
+				<param name="re">2.6504034015</param>
+				<param name="B">2.13726</param>
+				<param name="beta">5.11809</param>
+				<fit-dof><B/><beta/></fit-dof>
+				<screening>
+					<user-function id="V_2_screening">
+						<cutoff>7.92791</cutoff>
+						<input-var>r</input-var>
+						<expression>
+						  1 - 1/(1 + ((r - cutoff) / h)^4)
+						</expression>
+						<derivative>
+						  4 * h^4 * (r-cutoff)^3 / ((h^4 + (r-cutoff)^4)^2)
+						</derivative>
+						<param name="h">0.7</param>
+					</user-function>
+				</screening>
+			</user-function>
+		</sum>
+	      
+		<user-function id="rho">
+	      		<input-var>r</input-var>
+			<expression>
+			  fe * exp(- beta * (r / re - 1))
+			</expression>
+			<derivative>
+			  - fe * beta * exp(- beta * (r / re - 1)) / re
+			</derivative>
+			<param name="re">2.6504034015</param>
+			<param name="fe">2.2424174738</param>
+			<param name="beta">5.11809</param>
+			<!--<fit-dof><beta/></fit-dof>-->
+			<screening>
+				<user-function id="rho_screening">
+					<cutoff>7.92791</cutoff>
+					<input-var>r</input-var>
+					<expression>
+					  1 - 1/(1 + ((r - cutoff) / h)^4)
+					</expression>
+					<derivative>
+					  4 * h^4 * (r-cutoff)^3 / ((h^4 + (r-cutoff)^4)^2)
+					</derivative>
+					<param name="h">0.7</param>
+				</user-function>
+			</screening>
+		</user-function>
+
+	    	<user-function id="F">
+	      		<input-var>rho</input-var>
+	      		<expression>
+			  (rho &lt; 0.85 * rhoe) ?
+			  -((20 * rho * (400 * (3174 - 443.604 * eta - 1943.3 * eta^2 + 454.087 * eta^3) * rho^2 - 680 * (4761 - 665.407 * eta - 2175.69 * eta^2 + 499.369 * eta^3) * rho * rhoe + 6647 * (414 - 57.8614 * eta - 105.03 * eta^2 + 23.8993 * eta^3) * rhoe^2) * F0)/(14739 * (-1058 + 147.868 * eta - 10.2774 * eta^2 + 0.419286 * eta^3) * rhoe^3))
+			  : (rho &lt; 1.15 * rhoe) ?
+			  ((-0.419286 * eta^3 * (40 * rho - 37 * rhoe) * (20 * rho - 23 * rhoe)^2 + 28566 * rhoe^3 - 3992.44 * eta * rhoe^3 + eta^2 * (20 * rho - 23 * rhoe) * (507.048 * rho^2 - 1630.74 * rho * rhoe + 1031.2 * rhoe^2)) * F0)/(27 * (1058 - 147.868 * eta + 10.2774 * eta^2 - 0.419286 * eta^3) * rhoe^3)
+			  :
+			  (2^(1 + 2 * eta) * 5^eta * 23^(2 - eta) * (rho/rhoe)^eta * (-1 + eta * log((rho/rhoe))) * F0)/(-1058 + 147.868 * eta - 10.2774 * eta^2 + 0.419286 * eta^3)
+	      		</expression>
+		     	<derivative>
+			  (rho &lt; 0.85 * rhoe) ?
+			  -((20 * (1200 * (3174 - 443.604 * eta - 1943.3 * eta^2 + 454.087 * eta^3) * rho^2 - 1360 * (4761 - 665.407 * eta - 2175.69 * eta^2 + 499.369 * eta^3) * rho * rhoe + 6647 * (414 - 57.8614 * eta - 105.03 * eta^2 + 23.8993 * eta^3) * rhoe^2) * F0)/(14739 * (-1058 + 147.868 * eta - 10.2774 * eta^2 + 0.419286 * eta^3) * rhoe^3))
+			  : (rho &lt; 1.15 * rhoe) ?
+			  (800 * eta^2 * (rho - rhoe) * (20 * (-0.633811 + 0.419286 * eta) * rho - 23 * (-1.0531 + 0.419286 * eta) * rhoe) * F0)/(9 * (-1058 + 147.868 * eta - 10.2774 * eta^2 + 0.419286 * eta^3) * rhoe^3)
+			  :
+			  (2^(1 + 2 * eta) * 5^eta * 23^(2 - eta) * eta^2 * (rho/rhoe)^eta * log((rho/rhoe)) * F0)/((-1058 + 147.868 * eta - 10.2774 * eta^2 + 0.419286 * eta^3) * rho)
+		      	</derivative>
+			<param name="F0">-2.13854</param>
+			<param name="rhoe">39.0621863425926</param>
+			<param name="eta">-0.0867711</param>
+			<fit-dof><F0/><eta/></fit-dof>
+		</user-function>
+
+	</functions>
+
+</eam>

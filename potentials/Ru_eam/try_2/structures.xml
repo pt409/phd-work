@@ -1,0 +1,67 @@
+<group>
+
+  <hcp-lattice id="hcp" relative-weight="100">
+    <atom-type>Ru</atom-type>
+    <lattice-parameter>2.706</lattice-parameter>
+    <ca-ratio>1.5824</ca-ratio>
+    <relax-dof>
+      <atom-coordinates relax="false"/>
+      <lattice-parameter reset="false" />
+      <ca-ratio reset="false"/>
+    </relax-dof>
+    <properties>
+      <!--<atomic-energy/>-->
+      <atomic-energy fit="true" target="-6.74" relative-weight="5"/>
+      <lattice-parameter fit="true" target="2.706" min="2.50" relative-weight="100"/>
+      <ca-ratio fit="true" target="1.5824" min="1.40" relative-weight="100"/>
+      <!--<lattice-parameter/><ca-ratio/>-->
+      <bulk-modulus fit="true" target="220.0" relative-weight="100"/>
+      <!--<bulk-modulus/>-->
+      <!--<C11 target="576" relative-weight="50"/>
+      <C12 target="187" relative-weight="50"/>
+      <C33 target="641" relative-weight="50"/>
+      <C13 target="167" relative-weight="50"/>
+      <C44 target="189" relative-weight="50"/>-->
+      <C11/><C12/><C33/><C13/><C44/>
+      <C66/>
+    </properties>
+  </hcp-lattice>
+
+  <hcp-lattice id="hcp-static">
+    <atom-type>Ru</atom-type>
+    <lattice-parameter>2.706</lattice-parameter>
+    <ca-ratio>1.5824</ca-ratio>
+    <output file="POSCAR.static-structure" format="poscar"/>
+    <properties>
+      <lattice-parameter equalto="hcp.lattice-parameter"/>
+      <ca-ratio equalto="hcp.ca-ratio"/>
+      <atomic-energy/>
+    </properties>
+  </hcp-lattice>
+
+  <point-defect id="vac">
+    <atom-type-A>Ru</atom-type-A>
+    <lattice-type>hcp</lattice-type>
+    <cell-size>4</cell-size>
+    <lattice-parameter>2.706</lattice-parameter>
+    <ca-ratio>1.5824</ca-ratio>
+    <output file="POSCAR.defect-structure" format="poscar"/>
+    <defects>
+      <vacancy index="1" />
+    </defects>
+    <relax-dof>
+	<atom-coordinates reset="true"/>
+    </relax-dof>
+    <properties>
+      <atomic-energy/>
+      <lattice-parameter equalto="hcp.lattice-parameter"/>
+      <ca-ratio equalto="hcp.ca-ratio"/>
+    </properties>
+  </point-defect>
+
+    <derived-property id="voigt_shear_mod" unit="GPa" fit="true" target="173.0" relative-weight="40"
+                        equation="([hcp.C11] + [hcp.C12] + 2 * [hcp.C33] - 4 * [hcp.C13] + 12 * [hcp.C44] + 12 * [hcp.C66])/30"/>
+    <derived-property id="vacancy-energy" unit="eV" fit="true" target="3.64" relative-weight="10"
+                        equation="[vac.total-energy] - 127*[hcp-static.atomic-energy]"/>
+
+</group>

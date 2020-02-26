@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='iso-8859-1'?>
+<job>
+
+  <name>Fitting an EAM potential for ruthenium</name>
+  
+  <verbosity>medium</verbosity>
+  
+  <fitting>
+    <!--<spa max-iter="50" seed="3091920">-->
+      <BFGS conv-threshold='1e-3' max-iter='100' gradient-epsilon="1e-4"/>
+    <!--</spa>-->
+  </fitting>
+  
+  <atom-types>
+    <species>Ru</species>
+  </atom-types>
+  
+  <potentials>
+    <xi:include href='potential.xml'
+		xmlns:xi='http://www.w3.org/2003/XInclude' />
+  </potentials>
+  
+  <structures>
+    <xi:include href='structures.xml'
+		xmlns:xi='http://www.w3.org/2003/XInclude' />
+  </structures>
+
+</job>
