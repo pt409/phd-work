@@ -1,0 +1,17 @@
+create.f90:8:25:
+
+   integer, parameter :: n
+                         1
+Error: PARAMETER at (1) is missing an initializer
+create.f90:14:23:
+
+             read(9,*) n
+                       1
+Error: Symbol ‘n’ at (1) has no IMPLICIT type
+create.f90:23:13:
+
+          use globals
+             1
+Fatal Error: Can't open module file ‘globals.mod’ for reading at (1): No such file or directory
+compilation terminated.
+gfortran: error: -E or -x required when input is from standard input
