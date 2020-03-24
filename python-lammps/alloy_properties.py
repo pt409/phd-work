@@ -19,6 +19,9 @@ compositions = [#[{"Ni":0.717,"Cr":0.113,"Al":0.077,"Ta":0.011,"Mo":0.082}],
                 [{"Ni":0.6728,"Cr":0.2322,"Al":0.0292,"Ta":0.0095,"W":0.0290,"Mo":0.0272}],
                 [{"Ni":0.5248,"Cr":0.2558,"Co":0.1460,"Al":0.0139,"Ta":0.0080,"W":0.0254,"Mo":0.0262}]]
 
+with open("output","a+") as output:
+    output.write("sfe\tdensity\tlattice\tC11\tC12\tC44\n")
+
 for i,composition in enumerate(compositions):
     sfe,rho,a,c11,c12,c44 = alloy_md_properties(composition,"alloy_%d" %i,'sfe','density','lattice','C11','C12','C44')
     with open("output","a+") as output:
