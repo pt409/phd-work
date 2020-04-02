@@ -62,7 +62,8 @@ def calc_prc_frac(nom,mtx,prc):
         prc = np.delete(prc,zero_vals)
     return 100*np.mean((nom-mtx)/(prc-mtx))
 
-def process_row(index,row,return_codes=False):
+# Process compositions (nominal, matrix, and precipitate as well as precipitate fractions.)
+def process_composition(index,row,return_codes=False):
     # Convert any wt. % compositions to at. % and vice versa
     nom_wt_comp = row["Composition","wt. %"].values
     nom_at_comp = row["Composition","at. %"].values
@@ -110,13 +111,34 @@ def process_row(index,row,return_codes=False):
         return nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac
     else:
         return nom_wt_comp,nom_at_comp,nom_rtn_code,mtx_wt_comp,mtx_at_comp,mtx_rtn_code,prc_wt_comp,prc_at_comp,prc_rtn_code,wt_frac,wt_frac_rtn_code,at_frac,at_frac_rtn_code
+
+# Compute Larson-Miller parameter
+def lmp(temp_degC,time_hrs,lmp_param=20,factor=1e-3):
+    return factor*(temp_degC+273.15)*(lmp_param+np.log10(time_hrs))
+
+# Process creep data
+def process_creep(index,row,stress_bins=None):  
+    entry_data = pd.DataFrame(row["Creep life"].values.reshape(9,10)).sort_values(by=[1]).to_numpy()
+    for j,entry_col in enumerate(entry_data):
+        stress,temp,lmp_1pc,lmp_rupture,t_1pc,t_rupture = tuple(entry_col[:6])
+        # Check whether stress entry is non-zero
+        if not np.isnan(stress):
+            # If temp entry is nonzero look for entries for non-LMP data (time data) and convert to LMP
+            if not np.isnan(temp):
+                if (not np.isnan(t_1pc)) and np.isnan(lmp_1pc): # 1% creep time
+                    lmp_1pc = lmp(temp,t_1pc)
+                if (not np.isnan(t_rupture)) and np.isnan(lmp_rupture): # Rupture time
+                    lmp_rupture = lmp(temp,t_rupture)
+        entry_data[j][2] = lmp_1pc
+        entry_data[j][3] = lmp_rupture
+    return entry_data.reshape(90)
     
 # Will make a copy of the dataframe to process
 df_proc = df.copy()
 
 # Process the entire database and write it to the copied database.
 for index, row in df.iterrows():
-    nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac = process_row(index,row)
+    nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac = process_composition(index,row)
     # Write these values to the copied database
     df_proc.loc[index,("Composition","wt. %")] = nom_wt_comp
     df_proc.loc[index,("Composition","at. %")] = nom_at_comp
@@ -127,6 +149,9 @@ for index, row in df.iterrows():
     df_proc.loc[index,("γ’ fraction","wt. %","Unnamed: 41_level_2")] = wt_frac    
     df_proc.loc[index,("γ’ fraction","at. %","Unnamed: 42_level_2")] = at_frac
     df_proc.loc[index,("γ’ fraction","vol. %","Unnamed: 43_level_2")] = at_frac
+    # Do the same thing for creep data
+    new_creep_data = process_creep(index,row)
+    df_proc.loc[index,"Creep life"] = process_creep(index,row)
     
 # Write out the processed database to a csv file.
 df_proc.to_csv(output_database)
