@@ -117,27 +117,96 @@ def lmp(temp_degC,time_hrs,lmp_param=20,factor=1e-3):
     return factor*(temp_degC+273.15)*(lmp_param+np.log10(time_hrs))
 
 # Process creep data
-def process_creep(index,row,stress_bins=None):  
-    entry_data = pd.DataFrame(row["Creep life"].values.reshape(9,10)).sort_values(by=[1]).to_numpy()
+def process_creep(index,row,stress_bins=None,use_bin_stress=True,count_stresses=False):
+    # Have an option to sort stresses according to certain supplied bins
+    if np.any(stress_bins):
+        stress_vals = np.mean(stress_bins,axis=1)
+        n_bins = len(stress_vals)
+    else: 
+        n_bins = 9
+    entry_data = pd.DataFrame(row["Creep life"].values.reshape(n_bins,10)).sort_values(by=[1]).to_numpy()
+    output_data = np.full_like(entry_data,np.nan)
+    # Get all the stresses in the row and process them
+    stresses = []
     for j,entry_col in enumerate(entry_data):
-        stress,temp,lmp_1pc,lmp_rupture,t_1pc,t_rupture = tuple(entry_col[:6])
+        temp,stress,lmp_1pc,lmp_rupture,t_1pc,t_rupture = tuple(entry_col[:6])
         # Check whether stress entry is non-zero
         if not np.isnan(stress):
+            if count_stresses: stresses += [stress]
             # If temp entry is nonzero look for entries for non-LMP data (time data) and convert to LMP
             if not np.isnan(temp):
                 if (not np.isnan(t_1pc)) and np.isnan(lmp_1pc): # 1% creep time
                     lmp_1pc = lmp(temp,t_1pc)
                 if (not np.isnan(t_rupture)) and np.isnan(lmp_rupture): # Rupture time
                     lmp_rupture = lmp(temp,t_rupture)
-        entry_data[j][2] = lmp_1pc
-        entry_data[j][3] = lmp_rupture
-    return entry_data.reshape(90)
+            # Identify the correct bin
+            if np.any(stress_bins):
+                for k,bin_ in enumerate(stress_bins):
+                    if bin_[0]<=stress<=bin_[-1]:
+                        break
+                # If stresses are being binned might want to use the avg. bin value for stress
+                if use_bin_stress:
+                    stress = stress_vals[k]
+            else:
+                k = 1*j # Put data into same position as it's in in the input in this case.
+            entry_data[j][2] = lmp_1pc
+            entry_data[j][3] = lmp_rupture
+            output_data[k] = entry_data[j] # Use the output_data variable instead of the entry_data one.
+            # NB only write output data in case that a stress value has been found
+    if count_stresses:
+        return output_data.reshape(10*n_bins), stresses
+    else: return output_data.reshape(10*n_bins)
+
+# Bin the values of stress used in creep strength tests together using a certain bin size in %.
+def bin_stresses(stress_values,bin_size=5):
+    # Works with unique or all stresses
+    # Bin size in +/- % allowed.
+    stress_values.sort()
+    bin_bots = []
+    bin_tops = []
+    bin_vals = []
+    count = 0
+    bin_counts = []
+    bin_top = 0
+    for stress in stress_values:
+        if stress > bin_top:
+            bin_bots += [stress]
+            bin_top = (1+0.01*bin_size)*stress
+            bin_tops += [bin_top]
+            bin_vals += [(1+0.005*bin_size)*stress]
+            bin_counts += [count]
+            count = 1
+        else:
+            count += 1
+    bin_counts += [count]
+    bin_counts.remove(0)
+    return np.array([bin_bots,bin_tops]).transpose(), np.array(bin_vals)
     
 # Will make a copy of the dataframe to process
 df_proc = df.copy()
 
-# Process the entire database and write it to the copied database.
+# Loop through dataframe w/o modification to get all the stress values
+stresses = []
 for index, row in df.iterrows():
+    new_creep_data, stresses_found = process_creep(index,row,count_stresses=True)
+    stresses += stresses_found
+# Bin the stresses that were found
+bins,vals = bin_stresses(stresses)
+bin_number = len(vals)
+# Modify dataframe
+entries_per_test = 10
+lvl_1_names = list(df["Creep life"].columns[:entries_per_test].get_level_values(0))
+current_cols = np.nonzero(df.columns.get_loc("Creep life"))[0]
+orig_bin_num = len(current_cols)//entries_per_test
+for k in range(bin_number-orig_bin_num):
+    col_0 = current_cols[-1]+k*entries_per_test+1
+    df_proc.insert(int(col_0),("Creep life","Test conditions",'Temp (ºC) .%d' %(k+orig_bin_num)),np.nan)
+    df_proc.insert(int(col_0)+1,("Creep life","Test conditions",'Stress (MPa) .%d' %(k+orig_bin_num)),np.nan)
+    for l,name in enumerate(lvl_1_names[2:]):
+        df_proc.insert(int(col_0+l+2),("Creep life",name,"Unnamed: %d_level_2" %(col_0+l+2)),np.nan)
+
+# Process the entire database and write it to the copied database.
+for index, row in df_proc.iterrows():
     nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac = process_composition(index,row)
     # Write these values to the copied database
     df_proc.loc[index,("Composition","wt. %")] = nom_wt_comp
@@ -150,8 +219,8 @@ for index, row in df.iterrows():
     df_proc.loc[index,("γ’ fraction","at. %","Unnamed: 42_level_2")] = at_frac
     df_proc.loc[index,("γ’ fraction","vol. %","Unnamed: 43_level_2")] = at_frac
     # Do the same thing for creep data
-    new_creep_data = process_creep(index,row)
-    df_proc.loc[index,"Creep life"] = process_creep(index,row)
+    new_creep_data = process_creep(index,row,stress_bins=bins)
+    df_proc.loc[index,"Creep life"] = new_creep_data
     
 # Write out the processed database to a csv file.
 df_proc.to_csv(output_database)
