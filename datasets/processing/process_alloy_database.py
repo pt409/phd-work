@@ -156,6 +156,30 @@ def process_creep(index,row,stress_bins=None,use_bin_stress=True,count_stresses=
     if count_stresses:
         return output_data.reshape(10*n_bins), stresses
     else: return output_data.reshape(10*n_bins)
+    
+# Process the misfit data
+def process_misfit(index,row):
+    a, a_1_code = check_if_valid(row["γ lattice param"].values[0])
+    a_,a_2_code = check_if_valid(row["γ’ lattice param"].values[0])
+    misfits = row["RT Lattice misfit"].values
+    d1,a_diff,d2 = tuple(misfits)
+    d1,d1_code = check_if_valid(d1)
+    d2,d2_code = check_if_valid(d2)
+    a_diff,a_d_code = check_if_valid(a_diff)
+    d1/=100 ; d2/=100 # Originally given as percentages.
+    if d2_code==2:
+        pass # This is the desired form of the misfit
+    else :
+        if d1_code==2:
+            d2 = d1/(1+0.5*d1)
+        elif a_1_code==2 and a_2_code==2:
+            d2 = 2*(a_-a)/(a_+a)
+        elif a_1_code==2 and a_d_code==2:
+            d2 = 2*a_diff/(a_diff+2*a)
+        elif a_2_code==2 and a_d_code==2:
+            d2 = 2*a_diff/(-a_diff+2*a_)
+    d1*=100 ; d2*=100 # Convert back to percentages.
+    return a,a_,np.array([d1,a_diff,d2])
 
 # Bin the values of stress used in creep strength tests together using a certain bin size in %.
 def bin_stresses(stress_values,bin_size=5):
@@ -221,6 +245,11 @@ for index, row in df_proc.iterrows():
     # Do the same thing for creep data
     new_creep_data = process_creep(index,row,stress_bins=bins)
     df_proc.loc[index,"Creep life"] = new_creep_data
+    # ... and for misfit data
+    a,a_,misfits = process_misfit(index,row)
+    df_proc.loc[index,"γ lattice param"] = a
+    df_proc.loc[index,"γ’ lattice param"] = a_
+    df_proc.loc[index,"RT Lattice misfit"] = misfits
     
 # Write out the processed database to a csv file.
 df_proc.to_csv(output_database)
