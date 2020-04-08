@@ -62,8 +62,17 @@ def calc_prc_frac(nom,mtx,prc):
         prc = np.delete(prc,zero_vals)
     return 100*np.mean((nom-mtx)/(prc-mtx))
 
+def read_in_part_coeff(input_):
+    return np.array([np.nan if i == "-" else i for i in input_]).astype(np.float64)
+
+def inf_2_large(input_,large_num):
+    return np.array([large_num if np.isinf(_) else _ for _ in input_])
+
+def replace_if_new_value(input_old,input_new):
+    return np.array([old if np.isfinite(old) else new for old,new in zip(input_old,input_new)])
+
 # Process compositions (nominal, matrix, and precipitate as well as precipitate fractions.)
-def process_composition(index,row,return_codes=False):
+def process_composition(index,row,return_codes=False,inf_value=1e6):
     # Convert any wt. % compositions to at. % and vice versa
     nom_wt_comp = row["Composition","wt. %"].values
     nom_at_comp = row["Composition","at. %"].values
@@ -74,6 +83,9 @@ def process_composition(index,row,return_codes=False):
     prc_wt_comp = row["γ’ composition","wt. %"].values
     prc_at_comp = row["γ’ composition","at. %"].values
     prc_wt_comp, prc_at_comp, prc_rtn_code = calc_wt_at_vv(prc_wt_comp,prc_at_comp,masses)
+    # Get the partitioning coefficients
+    K_part_wt = read_in_part_coeff(row["γ/γ’ partitioning ratio","wt. %"].values)
+    K_part_at = read_in_part_coeff(row["γ/γ’ partitioning ratio","at. %"].values)
     # Get the wt, at, vol percentages of the precipitates
     wt_frac,wt_frac_rtn_code=check_if_valid(row["γ’ fraction","wt. %","Unnamed: 41_level_2"])
     at_frac,at_frac_rtn_code=check_if_valid(row["γ’ fraction","at. %","Unnamed: 42_level_2"])
@@ -86,16 +98,44 @@ def process_composition(index,row,return_codes=False):
         if mtx_rtn_code and (not prc_rtn_code):
             if wt_frac_rtn_code==2: # Case 2: have wt frac
                 prc_wt_comp = (nom_wt_comp-(1-0.01*wt_frac)*mtx_wt_comp)/(0.01*wt_frac)
+                # Need to check for -ve values here.
+                if np.any(prc_wt_comp<0.0):
+                    # Compute a correction to the wt fraction of the precipitate
+                    d_wt_frac = np.nanmin(wt_frac*np.divide(prc_wt_comp,mtx_wt_comp))
+                    wt_frac -= d_wt_frac
+                    # Recompute the composition wt. %'s
+                    prc_wt_comp = (nom_wt_comp-(1-0.01*wt_frac)*mtx_wt_comp)/(0.01*wt_frac)
             if at_frac_rtn_code==2: # Case 3: have at frac
                 prc_at_comp = (nom_at_comp-(1-0.01*at_frac)*mtx_at_comp)/(0.01*at_frac)
+                # Need to check for -ve values here.
+                if np.any(prc_at_comp<0.0):
+                    # Compute a correction to the wt fraction of the precipitate
+                    d_at_frac = np.nanmin(at_frac*np.divide(prc_at_comp,mtx_at_comp))
+                    at_frac -= d_at_frac
+                    # Recompute the composition at. %'s
+                    prc_at_comp = (nom_at_comp-(1-0.01*at_frac)*mtx_at_comp)/(0.01*at_frac)
             if (at_frac_rtn_code==2) ^ (wt_frac_rtn_code==2): # Compute at from wt comp and vv
                 prc_wt_comp, prc_at_comp, prc_rtn_code = calc_wt_at_vv(prc_wt_comp,prc_at_comp,masses)
         # Case 4 and 5: have composition of the precipitate phase but not of the matrix (reverse of 2 and 3)
         elif (not mtx_rtn_code) and prc_rtn_code:
             if wt_frac_rtn_code==2: # Case 4: have wt frac
                 mtx_wt_comp = (nom_wt_comp-0.01*wt_frac*prc_wt_comp)/(1-0.01*wt_frac)
+                # Need to check for -ve values here.
+                if np.any(mtx_wt_comp<0.0):
+                    # Compute a correction to the wt fraction of the precipitate
+                    d_wt_frac = np.nanmin((100-wt_frac)*np.divide(mtx_wt_comp,prc_wt_comp))
+                    wt_frac += d_wt_frac
+                    # Recompute the composition wt. %'s
+                    mtx_wt_comp = (nom_wt_comp-0.01*wt_frac*prc_wt_comp)/(1-0.01*wt_frac)
             if at_frac_rtn_code==2: # Case 5: have at frac
                 mtx_at_comp = (nom_at_comp-0.01*at_frac*prc_at_comp)/(1-0.01*at_frac)
+                # Need to check for -ve values here.
+                if np.any(mtx_at_comp<0.0):
+                    # Compute a correction to the wt fraction of the precipitate
+                    d_at_frac = np.nanmin((100-at_frac)*np.divide(mtx_at_comp,prc_at_comp))
+                    at_frac += d_at_frac
+                    # Recompute the composition at. %'s
+                    mtx_at_comp = (nom_at_comp-0.01*at_frac*prc_at_comp)/(1-0.01*at_frac)
             if (at_frac_rtn_code==2) ^ (wt_frac_rtn_code==2): # Compute at from wt comp and vv
                 mtx_wt_comp, mtx_at_comp, mtx_rtn_code = calc_wt_at_vv(mtx_wt_comp,mtx_at_comp,masses)
         # Case 1: have compositions of each phase but not the precipitate fraction
@@ -107,10 +147,13 @@ def process_composition(index,row,return_codes=False):
             if at_frac_rtn_code==1:
                 at_frac = calc_prc_frac(nom_at_comp,mtx_at_comp,prc_at_comp)
                 at_frac_rtn_code = 2
+            # In this case the partitioning coefficients can be calculated too.
+            K_part_wt = replace_if_new_value(K_part_wt,inf_2_large(np.divide(mtx_wt_comp,prc_wt_comp),1e6))
+            K_part_at = replace_if_new_value(K_part_at,inf_2_large(np.divide(mtx_at_comp,prc_at_comp),1e6))
     if not return_codes:
-        return nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac
+        return nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac,K_part_wt,K_part_at
     else:
-        return nom_wt_comp,nom_at_comp,nom_rtn_code,mtx_wt_comp,mtx_at_comp,mtx_rtn_code,prc_wt_comp,prc_at_comp,prc_rtn_code,wt_frac,wt_frac_rtn_code,at_frac,at_frac_rtn_code
+        return nom_wt_comp,nom_at_comp,nom_rtn_code,mtx_wt_comp,mtx_at_comp,mtx_rtn_code,prc_wt_comp,prc_at_comp,prc_rtn_code,wt_frac,wt_frac_rtn_code,at_frac,at_frac_rtn_code,K_part_wt,K_part_at
 
 # Compute Larson-Miller parameter
 def lmp(temp_degC,time_hrs,lmp_param=20,factor=1e-3):
@@ -231,7 +274,7 @@ for k in range(bin_number-orig_bin_num):
 
 # Process the entire database and write it to the copied database.
 for index, row in df_proc.iterrows():
-    nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac = process_composition(index,row)
+    nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac,K_part_wt,K_part_at = process_composition(index,row)
     # Write these values to the copied database
     df_proc.loc[index,("Composition","wt. %")] = nom_wt_comp
     df_proc.loc[index,("Composition","at. %")] = nom_at_comp
@@ -242,6 +285,8 @@ for index, row in df_proc.iterrows():
     df_proc.loc[index,("γ’ fraction","wt. %","Unnamed: 41_level_2")] = wt_frac    
     df_proc.loc[index,("γ’ fraction","at. %","Unnamed: 42_level_2")] = at_frac
     df_proc.loc[index,("γ’ fraction","vol. %","Unnamed: 43_level_2")] = at_frac
+    df_proc.loc[index,("γ/γ’ partitioning ratio","wt. %")] = K_part_wt
+    df_proc.loc[index,("γ/γ’ partitioning ratio","at. %")] = K_part_at
     # Do the same thing for creep data
     new_creep_data = process_creep(index,row,stress_bins=bins)
     df_proc.loc[index,"Creep life"] = new_creep_data
