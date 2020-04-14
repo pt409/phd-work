@@ -72,7 +72,7 @@ def replace_if_new_value(input_old,input_new):
     return np.array([old if np.isfinite(old) else new for old,new in zip(input_old,input_new)])
 
 # Process compositions (nominal, matrix, and precipitate as well as precipitate fractions.)
-def process_composition(index,row,return_codes=False,inf_value=1e6):
+def process_composition(index,row,return_codes=False,inf_value=40):
     # Convert any wt. % compositions to at. % and vice versa
     nom_wt_comp = row["Composition","wt. %"].values
     nom_at_comp = row["Composition","at. %"].values
@@ -87,9 +87,9 @@ def process_composition(index,row,return_codes=False,inf_value=1e6):
     K_part_wt = read_in_part_coeff(row["γ/γ’ partitioning ratio","wt. %"].values)
     K_part_at = read_in_part_coeff(row["γ/γ’ partitioning ratio","at. %"].values)
     # Get the wt, at, vol percentages of the precipitates
-    wt_frac,wt_frac_rtn_code=check_if_valid(row["γ’ fraction","wt. %","Unnamed: 41_level_2"])
-    at_frac,at_frac_rtn_code=check_if_valid(row["γ’ fraction","at. %","Unnamed: 42_level_2"])
-    vl_frac,vl_frac_rtn_code=check_if_valid(row["γ’ fraction","vol. %","Unnamed: 43_level_2"])
+    wt_frac,wt_frac_rtn_code=check_if_valid(row["γ’ fraction","wt. %"])
+    at_frac,at_frac_rtn_code=check_if_valid(row["γ’ fraction","at. %"])
+    vl_frac,vl_frac_rtn_code=check_if_valid(row["γ’ fraction","vol. %"])
     # To a good approximation the at. % and vol. % are the same
     at_frac = 1*vl_frac if vl_frac_rtn_code==2 and at_frac_rtn_code!=2 else at_frac    
     at_frac_rtn_code = min(at_frac_rtn_code*vl_frac_rtn_code,2)
@@ -148,8 +148,8 @@ def process_composition(index,row,return_codes=False,inf_value=1e6):
                 at_frac = calc_prc_frac(nom_at_comp,mtx_at_comp,prc_at_comp)
                 at_frac_rtn_code = 2
             # In this case the partitioning coefficients can be calculated too.
-            K_part_wt = replace_if_new_value(K_part_wt,inf_2_large(np.divide(mtx_wt_comp,prc_wt_comp),1e6))
-            K_part_at = replace_if_new_value(K_part_at,inf_2_large(np.divide(mtx_at_comp,prc_at_comp),1e6))
+            K_part_wt = replace_if_new_value(K_part_wt,inf_2_large(np.divide(mtx_wt_comp,prc_wt_comp),inf_value))
+            K_part_at = replace_if_new_value(K_part_at,inf_2_large(np.divide(mtx_at_comp,prc_at_comp),inf_value))
     if not return_codes:
         return nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac,K_part_wt,K_part_at
     else:
@@ -282,9 +282,9 @@ for index, row in df_proc.iterrows():
     df_proc.loc[index,("γ composition","at. %")] = mtx_at_comp
     df_proc.loc[index,("γ’ composition","wt. %")] = prc_wt_comp
     df_proc.loc[index,("γ’ composition","at. %")] = prc_at_comp
-    df_proc.loc[index,("γ’ fraction","wt. %","Unnamed: 41_level_2")] = wt_frac    
-    df_proc.loc[index,("γ’ fraction","at. %","Unnamed: 42_level_2")] = at_frac
-    df_proc.loc[index,("γ’ fraction","vol. %","Unnamed: 43_level_2")] = at_frac
+    df_proc.loc[index,("γ’ fraction","wt. %")] = wt_frac    
+    df_proc.loc[index,("γ’ fraction","at. %")] = at_frac
+    df_proc.loc[index,("γ’ fraction","vol. %")] = at_frac
     df_proc.loc[index,("γ/γ’ partitioning ratio","wt. %")] = K_part_wt
     df_proc.loc[index,("γ/γ’ partitioning ratio","at. %")] = K_part_at
     # Do the same thing for creep data
