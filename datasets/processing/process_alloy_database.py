@@ -72,7 +72,7 @@ def replace_if_new_value(input_old,input_new):
     return np.array([old if np.isfinite(old) else new for old,new in zip(input_old,input_new)])
 
 # Process compositions (nominal, matrix, and precipitate as well as precipitate fractions.)
-def process_composition(index,row,return_codes=False,inf_value=40):
+def process_composition(index,row,return_codes=False,inf_value=1e3,correct_if_neg=False):
     # Convert any wt. % compositions to at. % and vice versa
     nom_wt_comp = row["Composition","wt. %"].values
     nom_at_comp = row["Composition","at. %"].values
@@ -108,7 +108,7 @@ def process_composition(index,row,return_codes=False,inf_value=40):
             if at_frac_rtn_code==2: # Case 3: have at frac
                 prc_at_comp = (nom_at_comp-(1-0.01*at_frac)*mtx_at_comp)/(0.01*at_frac)
                 # Need to check for -ve values here.
-                if np.any(prc_at_comp<0.0):
+                if np.any(prc_at_comp<0.0) and correct_if_neg:
                     # Compute a correction to the wt fraction of the precipitate
                     d_at_frac = np.nanmin(at_frac*np.divide(prc_at_comp,mtx_at_comp))
                     at_frac -= d_at_frac
