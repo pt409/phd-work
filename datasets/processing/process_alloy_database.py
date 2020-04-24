@@ -54,13 +54,13 @@ def calc_wt_at_vv(wt_comp,at_comp,masses):
     return wt_comp, at_comp, return_code
 
 # Calculate the fraction of gamma' precipitate from the nominal, matrix and precipitate chemical compositions.
-def calc_prc_frac(nom,mtx,prc):
-    zero_vals = np.concatenate((np.nonzero(nom==0)[0],np.nonzero(mtx==0)[0],np.nonzero(prc==0)[0]))
+def calc_prc_frac(nom,mtx,prc,error=0.01):
+    zero_vals = np.concatenate((np.nonzero(nom<=error)[0],np.nonzero(mtx<=error)[0],np.nonzero(prc<=error)[0]))
     if zero_vals.size > 0:
         nom = np.delete(nom,zero_vals)
         mtx = np.delete(mtx,zero_vals)
         prc = np.delete(prc,zero_vals)
-    return 100*np.mean((nom-mtx)/(prc-mtx))
+    return 100*np.average((nom-mtx)/(prc-mtx),weights=nom)
 
 def read_in_part_coeff(input_):
     return np.array([np.nan if i == "-" else i for i in input_]).astype(np.float64)
