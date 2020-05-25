@@ -29,7 +29,9 @@ def f(re,fe,rhoe,rhos,alpha,beta,A,B,chi,lambda0,Fn0,Fn1,Fn2,Fn3,
 
 # Embedding function        
 def F(re,fe,rhoe,rhos,alpha,beta,A,B,chi,lambda0,Fn0,Fn1,Fn2,Fn3,
-      F0,F1,F2,F3,eta,Fe,ielement,amass,F4,beta1,lambda1,rhol,rhoh):
+      F0,F1,F2,F3,eta,Fe,ielement,amass,F4,beta1,lambda1,rhol,rhoh,s=1.0):
+    rhoe *= s
+    rhos *= s
     rhon = rhol*rhoe
     rhoo = rhoh*rhoe
     def conditional(rho):
@@ -41,7 +43,19 @@ def F(re,fe,rhoe,rhos,alpha,beta,A,B,chi,lambda0,Fn0,Fn1,Fn2,Fn3,
             return Fe*(1-eta*np.log(rho/rhos))*(rho/rhos)**eta
     return np.vectorize(conditional)
 
-# Write a .setfl file
+# Cross species pair potentials
+def cross(types,tab_dens,tab_pots):
+    for a,type_a in enumerate(types):
+        for b,type_b in enumerate(types):
+            if a<b:
+                f_a = tab_dens[type_a]
+                f_b = tab_dens[type_b]
+                phi_aa = tab_pots[(type_a,type_a)]
+                phi_bb = tab_pots[(type_b,type_b)]
+                new_pair_pots = 0.5*(f_b/f_a*phi_aa+f_a/f_b*phi_bb)
+                tab_pots[(type_a,type_b)] = new_pair_pots
+
+# Write a .setfl tabulated eam file.
 def write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_embs,tab_dens,tab_pots):
     # Write top of file
     # Format as specified for a .setfl file to use with eam/alloy https://lammps.sandia.gov/doc/pair_eam.html
@@ -60,7 +74,7 @@ def write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_
                     np.savetxt(open_eam_file,tab_pots[(type_a,type_b)].reshape((-1,5)))
 
 def initial_eam(types,params=df,name="combo_eam.set",Nr=2000,Nrho=2000):
-    rc = np.sqrt(5/4)*params.loc[types,"re"].max()
+    rc = np.sqrt(5)*params.loc[types,"re"].max()
     rhoe_max = params.loc[types,"rhoe"].max()
     r,dr = np.linspace(0.0,rc,Nr,retstep=True)
     atom_nums = params.loc[types,"ielement"].to_dict()
@@ -88,22 +102,40 @@ def initial_eam(types,params=df,name="combo_eam.set",Nr=2000,Nrho=2000):
         embed_engs = F(**params.loc[atom_type].to_dict())(rho)  
         tab_embs[atom_type] = embed_engs
     # compute tabulated pairwise potentials.
-    for a,type_a in enumerate(types):
-        for b,type_b in enumerate(types):
-            if a<b:
-                f_a = tab_dens[type_a]
-                f_b = tab_dens[type_b]
-                phi_aa = tab_pots[(type_a,type_a)]
-                phi_bb = tab_pots[(type_b,type_b)]
-                new_pair_pots = 0.5*(f_b/f_a*phi_aa+f_a/f_b*phi_bb)
-                tab_pots[(type_a,type_b)] = new_pair_pots
+    cross(types,tab_dens,tab_pots)
     
     # Write the .setfl file
     write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_embs,tab_dens,tab_pots)
     
-    return tab_dens,tab_pots,tab_embs,f_max_as,dr,rc
+    return tab_dens,tab_pots,tab_embs,f_max_as,dr,rc,atom_nums,atom_mass,equ_dists
+
+def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
+                  f_max_as,dr,rc,atom_nums,atom_mass,equ_dists,
+                  params=df,name="trial_eam.set",Nr=2000,Nrho=2000):
+    # Copy the dictionaries across
+    tab_dens_t = tab_dens.copy()
+    tab_pots_t = tab_pots.copy()
+    tab_embs_t = tab_embs.copy()
+    # transform the density and pair potentials
+    for a,atom_type in enumerate(types):
+        tab_pots_t[(atom_type,atom_type)] -= 2*k[a]*tab_dens_t[atom_type]
+        tab_dens_t[atom_type] *= s[a]
+    # transform the cross-species pair potentials
+    cross(types,tab_dens_t,tab_pots_t)
+    # calculate rho_max
+    f_max = (s*f_max_as).max()
+    rhoe_max = (s*(params.loc[types,"rhoe"].to_numpy())).max()
+    rho_max = max([100.0,f_max,2*rhoe_max])
+    rho,drho = np.linspace(0.0,rho_max,Nrho,retstep=True)
+    # calculate tabulated embedding function
+    for atom_type,s_a,k_a in zip(types,s,k):
+        embed_engs = F(**params.loc[atom_type].to_dict(),s=s_a)(rho) + k_a/s_a*rho  
+        tab_embs_t[atom_type] = embed_engs
+    # write the .setfl file
+    write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_embs_t,tab_dens_t,tab_pots_t)
         
-def objective_function(k,s):
+def objective_function(x):
+    
     t0 = time.time()
     
     t1 = time.time()
