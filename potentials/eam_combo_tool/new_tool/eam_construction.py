@@ -8,7 +8,6 @@ Created on Thu May 21 15:59:40 2020
 
 import numpy as np
 import pandas as pd
-import time
 
 param_file = "eam_params"
 
@@ -73,6 +72,7 @@ def write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_
                 if a<=b:
                     np.savetxt(open_eam_file,tab_pots[(type_a,type_b)].reshape((-1,5)))
 
+# Write an eam .setfl w/o applying any gauge transformation.
 def initial_eam(types,params=df,name="combo_eam.set",Nr=2000,Nrho=2000):
     rc = np.sqrt(5)*params.loc[types,"re"].max()
     rhoe_max = params.loc[types,"rhoe"].max()
@@ -109,6 +109,7 @@ def initial_eam(types,params=df,name="combo_eam.set",Nr=2000,Nrho=2000):
     
     return tab_dens,tab_pots,tab_embs,f_max_as,dr,rc,atom_nums,atom_mass,equ_dists
 
+# Write an eam /setfl after applying a gauge transformation
 def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
                   f_max_as,dr,rc,atom_nums,atom_mass,equ_dists,
                   params=df,name="trial_eam.set",Nr=2000,Nrho=2000):
@@ -134,9 +135,8 @@ def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
     # write the .setfl file
     write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_embs_t,tab_dens_t,tab_pots_t)
         
-def objective_function(x):
+def objective_function(x,types=["Ni","Re"],init_output=initial_eam(["Ni","Re"])):
+    k,s = tuple(x.reshape(2,-1))
+    transform_eam(types,k,s,*init_output)
     
-    t0 = time.time()
     
-    t1 = time.time()
-    print("Total time to write potential = {:.3f}s".format(t1-t0))
