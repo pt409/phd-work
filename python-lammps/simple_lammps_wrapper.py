@@ -193,20 +193,23 @@ class Lammps :
         with open(self.input_loc(),"w+") as new_file:
             new_file.writelines(new_lines)
         
-    def read_log(self,thermo_style,np_out=True):
+    def read_log(self,thermo_style,np_out=True,incl_step=True):
         # thermo_style is the list of strings which appear before the quantities to extract
         # specify np_out=False to get a non numpy array output
         with open(self.log_loc(),'r') as infile:
             f = infile.readlines()
         
-        out_list = [[] for _ in thermo_style] + [[]]  
+        out_list = [[] for _ in thermo_style]
+        if incl_step: out_list += [[]]
         for l in f:
             l = l.split()
-            if 'Step' in l:
-                out_list[0] += [float(l[l.index('Step')+1])]
+            if incl_step:
+                if 'Step' in l:
+                    out_list[0] += [float(l[l.index('Step')+1])]
             for i,word in enumerate(thermo_style):
+                if incl_step: i += 1
                 if word in l:
-                    out_list[i+1] += [float(l[l.index(word)+2])]
+                    out_list[i] += [float(l[l.index(word)+2])]
         
         if np_out :            
             return np.array(out_list)
