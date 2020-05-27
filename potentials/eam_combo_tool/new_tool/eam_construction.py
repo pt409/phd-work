@@ -3,11 +3,13 @@
 """
 Created on Thu May 21 15:59:40 2020
 
-@author: cdt1801
+@author: Pat Taylor (pt409)
 """
-
 import numpy as np
 import pandas as pd
+import sys
+sys.path.append("../../../python-lammps")
+from simple_lammps_wrapper import Lammps
 
 param_file = "eam_params"
 
@@ -134,9 +136,29 @@ def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
         tab_embs_t[atom_type] = embed_engs
     # write the .setfl file
     write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_embs_t,tab_dens_t,tab_pots_t)
-        
-def objective_function(x,types=["Ni","Re"],init_output=initial_eam(["Ni","Re"])):
-    k,s = tuple(x.reshape(2,-1))
+
+# Read in an input file listing lammps scripts and target properties.
+def read_in_fitting(file_in="fitting_scripts"):
+    script_outputs = {}
+    with open(file_in,"r") as f:
+        for l in f:
+            row = l.split()
+            script_outputs[row[0]] = np.array(row[1:],dtype=np.float64)
+    return script_outputs
+
+# Objective fucntion to use with a minimiser. 
+def objective_function(x,types,init_output,lmp_scripts,lmp_insts):
+    k,s = tuple(np.c_[[0.,1.],x.reshape(2,-1)]) # Add extra paramters for reference element.
+    # rm old potential and create new one.
     transform_eam(types,k,s,*init_output)
-    
+    cost = 0
+    for script in lmp_scripts:
+        # Clean up previous runs.
+        lmp_insts[script].run() # Run lammps
+        prop_list = ["property_{}".format(i+1) for i,_ in enumerate(lmp_scripts[script])]
+        predictions = lmp_insts[script].read_log(prop_list,np_out=False,incl_step=False)
+        # Loop throught predicted properties---check if lammps actually returned them---and work out cost.
+        for j,pred in enumerate(predictions):
+            actual = lmp_scripts[script][j]
+            if pred: cost += ((actual-pred[-1])/actual)**2
     
