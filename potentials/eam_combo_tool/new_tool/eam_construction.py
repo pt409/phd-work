@@ -7,16 +7,25 @@ Created on Thu May 21 15:59:40 2020
 """
 import numpy as np
 import pandas as pd
+import os
 import sys
 sys.path.append("../../../python-lammps")
 from simple_lammps_wrapper import Lammps
+from scipy.optimize import minimize
+from copy import deepcopy
 
 param_file = "eam_params"
+
+Lammps.command(6,lammps_path="lammps")
 
 df = pd.read_table(param_file)
 df = df.set_index("element")
 df = df.rename(columns={"lambda":"lambda0"})
-types=["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
+#types=["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
+types=["Ni","Ru"]
+
+# Track number of eam trials
+trial_num = 0
 
 # Pairwise potential
 def phi(re,fe,rhoe,rhos,alpha,beta,A,B,chi,lambda0,Fn0,Fn1,Fn2,Fn3,
@@ -116,9 +125,9 @@ def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
                   f_max_as,dr,rc,atom_nums,atom_mass,equ_dists,
                   params=df,name="trial_eam.set",Nr=2000,Nrho=2000):
     # Copy the dictionaries across
-    tab_dens_t = tab_dens.copy()
-    tab_pots_t = tab_pots.copy()
-    tab_embs_t = tab_embs.copy()
+    tab_dens_t = deepcopy(tab_dens)
+    tab_pots_t = deepcopy(tab_pots)
+    tab_embs_t = deepcopy(tab_embs)
     # transform the density and pair potentials
     for a,atom_type in enumerate(types):
         tab_pots_t[(atom_type,atom_type)] -= 2*k[a]*tab_dens_t[atom_type]
@@ -139,26 +148,45 @@ def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
 
 # Read in an input file listing lammps scripts and target properties.
 def read_in_fitting(file_in="fitting_scripts"):
-    script_outputs = {}
+    script_targets = {}
+    script_insts = {}
     with open(file_in,"r") as f:
         for l in f:
             row = l.split()
-            script_outputs[row[0]] = np.array(row[1:],dtype=np.float64)
-    return script_outputs
+            script_targets[row[0]] = np.array(row[1:],dtype=np.float64)
+            script_insts[row[0]] = Lammps.setup(row[0])
+    return script_targets,script_insts
 
 # Objective fucntion to use with a minimiser. 
-def objective_function(x,types,init_output,lmp_scripts,lmp_insts):
+def objective_function(x,types,
+                       tab_dens,tab_pots,tab_embs,f_max_as,dr,rc,atom_nums,atom_mass,equ_dists,
+                       lmp_scripts,lmp_insts,log_dir="logs"):
+    global trial_num
     k,s = tuple(np.c_[[0.,1.],x.reshape(2,-1)]) # Add extra paramters for reference element.
-    # rm old potential and create new one.
-    transform_eam(types,k,s,*init_output)
+    # give some output about the current iteration
+    #for el,k_el,s_el in zip(types,k,s):
+    print("Iteration # {}.\n".format(trial_num))
+    print("\t".join(["k_{} = {:.5f}".format(el,k_el) for el,k_el in zip(types,k)])+"\n")
+    print("\t".join(["s_{} = {:.5f}".format(el,s_el) for el,s_el in zip(types,s)])+"\n")
+    # rm old potential and create new one with new k,s parameters.
+    if os.path.exists("trial_eam.set"): os.remove("trial_eam.set")
+    transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,f_max_as,dr,rc,atom_nums,atom_mass,equ_dists)
     cost = 0
     for script in lmp_scripts:
         # Clean up previous runs.
-        lmp_insts[script].run() # Run lammps
+        if os.path.exists(lmp_insts[script].log_loc()): 
+            os.rename(lmp_insts[script].log_loc(),"{}/iter{}_{}".format(log_dir,trial_num,lmp_insts[script].log_file))
+        # Run lammps
+        lmp_insts[script].run()
         prop_list = ["property_{}".format(i+1) for i,_ in enumerate(lmp_scripts[script])]
         predictions = lmp_insts[script].read_log(prop_list,np_out=False,incl_step=False)
         # Loop throught predicted properties---check if lammps actually returned them---and work out cost.
         for j,pred in enumerate(predictions):
             actual = lmp_scripts[script][j]
-            if pred: cost += ((actual-pred[-1])/actual)**2
+            if pred: 
+                print("Target value = {:.4f}\tpredicted value = {:.4f}\n".format(actual,pred[-1]))
+                cost += ((actual-pred[-1])/actual)**2
+    print("Total cost = {:.5f} for this iteration.\n".format(cost))
+    trial_num += 1
+    return cost
     
