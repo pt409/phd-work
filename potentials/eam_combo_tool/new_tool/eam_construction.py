@@ -11,10 +11,24 @@ import os
 import sys
 sys.path.append("../../../python-lammps")
 from simple_lammps_wrapper import Lammps
-from scipy.optimize import minimize
+from scipy.optimize import dual_annealing
 from copy import deepcopy
 
-param_file = "eam_params"
+# Read in the correct input files
+# After calling the script these should be:
+#    constr eam_params [list of element types]
+#    fit eam_params fitting_scripts [list of element types]
+run_type = None
+run_option = sys.argv[1]
+if "constr" in run_option:
+    run_type = 0
+    param_file = sys.argv[2]
+    types = sys.argv[3:]
+elif "fit" in run_option:
+    run_type = 1
+    param_file = sys.argv[2]
+    fitting_scripts = sys.argv[3]
+    types = sys.argv[4:]
 
 Lammps.command(6,lammps_path="lammps")
 
@@ -22,7 +36,7 @@ df = pd.read_table(param_file)
 df = df.set_index("element")
 df = df.rename(columns={"lambda":"lambda0"})
 #types=["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
-types=["Ni","Ru"]
+#types=["Ni","Ru"]
 
 # Track number of eam trials
 trial_num = 0
@@ -147,7 +161,7 @@ def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
     write_setfl(name,types,Nrho,drho,Nr,dr,rc,atom_nums,atom_mass,equ_dists,tab_embs_t,tab_dens_t,tab_pots_t)
 
 # Read in an input file listing lammps scripts and target properties.
-def read_in_fitting(file_in="fitting_scripts"):
+def read_in_fitting(file_in):
     script_targets = {}
     script_insts = {}
     with open(file_in,"r") as f:
@@ -157,7 +171,7 @@ def read_in_fitting(file_in="fitting_scripts"):
             script_insts[row[0]] = Lammps.setup(row[0])
     return script_targets,script_insts
 
-# Objective fucntion to use with a minimiser. 
+# Objective function to use with a minimiser. 
 def objective_function(x,types,
                        tab_dens,tab_pots,tab_embs,f_max_as,dr,rc,atom_nums,atom_mass,equ_dists,
                        lmp_scripts,lmp_insts,log_dir="logs"):
@@ -189,4 +203,24 @@ def objective_function(x,types,
     print("Total cost = {:.5f} for this iteration.\n".format(cost))
     trial_num += 1
     return cost
-    
+
+##############################################################################
+# Run through any argv options provided to script.
+if run_type == 0:
+    eam_name = "".join(types)+".set"
+    initial_eam(types,name=eam_name)
+if run_type == 1:
+    eam_name_0 = "".join(types)+".set"
+    eam_name_f = "".join(types)+"-fitted.set"
+    # Need a file to store lammps log files.
+    if not os.path.exists("logs"):
+        os.mkdir("logs")
+    out_0 = initial_eam(types,name=eam_name_0)
+    out_1 = read_in_fitting(fitting_scripts) 
+    # Use simulated annealing to fit k,s.
+    fit_result = dual_annealing(objective_function,np.array([[-2.0,1.0],[0.6,1.4]]),
+                   maxiter=5000,
+                   args=tuple([types])+out_0+out_1,
+                   maxfun=1e5)
+    k,s = tuple(np.c_[[0.,1.],(fit_result.x).reshape(2,-1)])
+    transform_eam(types,k,s,*out_0,name=eam_name_f)
