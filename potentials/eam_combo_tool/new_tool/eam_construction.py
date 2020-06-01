@@ -221,6 +221,12 @@ if run_type == 1:
     fit_result = dual_annealing(objective_function,np.array([[-2.0,1.0],[0.6,1.4]]),
                    maxiter=5000,
                    args=tuple([types])+out_0+out_1,
-                   maxfun=1e5)
+                   maxfun=100000,
+                   local_search_options={"method":"Nelder-Mead"})
     k,s = tuple(np.c_[[0.,1.],(fit_result.x).reshape(2,-1)])
+    print("###### OPTIMAL RESULT ######\n")
+    print("\t".join(["k_{} = {:.5f}".format(el,k_el) for el,k_el in zip(types,k)])+"\n")
+    print("\t".join(["s_{} = {:.5f}".format(el,s_el) for el,s_el in zip(types,s)])+"\n\n")
     transform_eam(types,k,s,*out_0,name=eam_name_f)
+    print("Simulated annealing ouput")
+    print(fit_result)
