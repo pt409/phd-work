@@ -13,7 +13,7 @@ from mendeleev import element
 
 from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
 from sklearn.metrics import r2_score, mean_squared_error
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import LeaveOneOut, cross_val_score
 from sklearn.kernel_ridge import KernelRidge
 
 # Read in a processed dataset.
@@ -58,7 +58,65 @@ def grab_data(header,df=df,transform_ht=False,warn_if_insuff=False,dat_range=Non
     if warn_if_insuff: 
         print("# data points = %d, input dims = %d" % (input_.shape[0],input_.shape[1]))
         if input_.shape[0] <= input_.shape[1]: print("Insufficient # data points (%d) for fitting.\n" % input_.shape[0])
-    return np.array(input_), np.array(output)    
+    return np.array(input_), np.array(output)  
+
+def get_microstructure_data(df):
+    ms_df = df.copy()
+    drop_indices = []
+    for index,row in df.iterrows():
+        ht, ht_code = check_if_valid(row[("Precipitation heat treatment")],allow_all_null=True)
+        if ht_code == 2:
+            comp, comp_code = check_if_valid(row[("Composition","at. %")])
+            if comp_code == 2:
+                frac, frac_code = check_if_valid(row[("γ’ fraction","at. %")])
+                if frac_code == 2:
+                    prc, prc_code   = check_if_valid(row[("γ’ composition","at. %")])
+                    if prc_code == 2:
+                        mtx, mtx_code   = check_if_valid(row[("γ composition","at. %")])
+                        if mtx_code == 2:
+                            continue
+        drop_indices += [index]
+    ms_df.drop(drop_indices,inplace=True)
+    return ms_df
 
 # Model of coarsening rate for combining heat treatment times and temperatures.
 coarsening_rate = lambda temp,time : time*(273+temp)**(-1/3)
+
+# Class to define the unique kernel used.
+class special_kernel :
+    def __init__(self,si,gamma,dim):
+        self.tdim = dim+1
+        self.S = np.diag(np.append(si,1))
+        self.gamma = gamma
+        v = np.zeros(self.tdim)
+        v[-1] = 1
+        v -= np.ones(self.tdim)/np.sqrt(self.tdim)
+        self.P = np.identity(self.tdim) - 2*v@v.T/(v.T@v)
+        self.Idish = np.r_[np.identity(dim),np.ones((1,dim))]
+        
+    # Used internally to construct a kernel.
+    def construct_trans(self):
+        self.M = self.P@self.S@self.P@self.Idish
+    
+    # Calculate kernelised inner product.
+    def kernel(self,x,y):
+        return np.exp(-self.gamma*np.linalg.norm(self.M@(x-y),1))
+    
+    # Update kernel parameters.
+    def update_params(self,si,gamma):
+        self.S = np.diag(np.append(si,1))
+        self.gamma = gamma
+        self.construct_trans()
+        
+    @classmethod
+    def setup(cls,si,gamma):
+        dim = si.shape[0]
+        new_instance = cls(si,gamma,dim)
+        new_instance.construct_trans()
+        return new_instance
+
+ms_df = get_microstructure_data(df)
+y = ms_df[("γ’ fraction","at. %")].values
+X = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).values
+
+my_kernel = special_kernel.setup()
