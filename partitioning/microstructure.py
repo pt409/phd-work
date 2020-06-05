@@ -13,8 +13,10 @@ from mendeleev import element
 
 from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
 from sklearn.metrics import r2_score, mean_squared_error
-from sklearn.model_selection import LeaveOneOut, cross_val_score
+from sklearn.model_selection import LeaveOneOut, cross_validate
 from sklearn.kernel_ridge import KernelRidge
+
+from scipy.optimize import minimize
 
 # Read in a processed dataset.
 df = pd.read_csv("../datasets/processing/processed_alloy_database_v2.csv",header=[0,1,2])
@@ -91,7 +93,7 @@ class special_kernel :
         v = np.zeros(self.tdim)
         v[-1] = 1
         v -= np.ones(self.tdim)/np.sqrt(self.tdim)
-        self.P = np.identity(self.tdim) - 2*v@v.T/(v.T@v)
+        self.P = np.identity(self.tdim) - 2*np.outer(v,v)/np.inner(v,v)
         self.Idish = np.r_[np.identity(dim),np.ones((1,dim))]
         
     # Used internally to construct a kernel.
@@ -114,9 +116,47 @@ class special_kernel :
         new_instance = cls(si,gamma,dim)
         new_instance.construct_trans()
         return new_instance
+    
+# Wrapper for sklearn predictor when there are n models in a cohort and prediction is the mean one.
+class cohort_model:
+    def __init__(self,n):
+        self.n = n # total number of models
+        self.n_added = 0 # current number of models
+        self.cohort = {}
+    
+    def add_model(self,model):
+        self.cohort[self.n_added] = model
+        self.n_added += 1
+    
+    # As above but for a list
+    def add_models(self,models):
+        for inst in models: self.add_model(inst)
+        
+    def predict(self,X):
+        if self.n_added == self.n:
+            return np.mean([model.predict(X)for model in self.cohort.items()],axis=0)
+        else: 
+            print("Need {} models and have {} in cohort".format(self.n,self.n_added))
+            return None
 
 ms_df = get_microstructure_data(df)
 y = ms_df[("γ’ fraction","at. %")].values
-X = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).values
+X = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
 
-my_kernel = special_kernel.setup()
+my_kernel = special_kernel.setup(np.ones(X.shape[1]),0.1)
+
+def train_cohort_model(alpha_j,X,y):
+    loo = LeaveOneOut()
+    n = loo.get_n_splits(X)
+    krr_cohort = cohort_model(n)
+    gcv = 0 # Generalised cross validation error
+    for train_i,val_i in loo.split(X):
+        X_train, X_val = X[train_i], X[val_i]
+        y_train, y_val = y[train_i], y[val_i]
+        krr_i = KernelRidge(alpha=alpha_j,kernel=my_kernel.kernel) # The kernel ridge regression model.
+        krr_i.fit(X_train,y_train)
+        dy = y_val - krr_i.predict(X_val)
+        gcv += np.dot(dy,dy)[0,0]
+        krr_cohort.add_model(krr_i)
+    gcv /= n
+    return gcv
