@@ -84,12 +84,14 @@ def get_microstructure_data(df):
     return ms_df
 
 # Use in conjunction with get_microstructure to get the X,y data for machine learning purposes.
-def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],drop_na = True):
+def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],drop_na = True,flatten=False):
     # Enter header as tuple in case of multiindex
     if drop_na:
         sub_df = df.dropna(subset=[y_header])
     else: sub_df = df.copy()
     y = sub_df[y_header].astype(np.float64).values
+    if flatten and len(y.shape) > 1 and y.shape[-1] == 1:
+        y = y.flatten()
     X = (sub_df.loc[:,("Composition","at. %")]).drop(drop_els,axis=1).astype(np.float64).values
     return X,y
 
@@ -170,7 +172,7 @@ def train_cohort_model(alpha_j,X,y,model_loc=[None]):
         krr_i = KernelRidge(alpha=alpha_j,kernel=my_kernel.kernel) # The kernel ridge regression model.
         krr_i.fit(X_train,y_train)
         dy = y_val - krr_i.predict(X_val)
-        gcv += np.dot(dy,dy)
+        gcv += np.dot(dy,dy)/(dy.shape[0])
         krr_cohort.add_model(krr_i)
     gcv /= n
     model_loc[0] = krr_cohort # This way the model can be accessed without returning it.
@@ -187,13 +189,13 @@ for el in elements:
     if not part_coeff_header in ms_df:
         part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ")
     ml_data_dict[el] = get_Xy(ms_df,part_coeff_header)
-ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False)
+ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True)
 output_head = "        \t"+"\t".join(elements + ["f"])
 
 # Target data
 x_comp = ml_data_dict["f"][0]
 x_prc_target = (ms_df.loc[:,("γ’ composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
-f = ml_data_dict["f"][1]
+f = ml_data_dict["f"][1].reshape(-1,1)
 
 # Kernel ridge model for each microstructural property.
 next_alpha = {ms_prop:0.1 for ms_prop in ml_data_dict.keys()}
@@ -216,13 +218,24 @@ def calc_microstruc_error(sij,v=1):
     error_output =  "CV err =\t"
     for ms_prop, ms_data in ml_data_dict.items():
         krr_model_as_list = [None]
-        result = minimize(train_cohort_model,next_alpha[ms_prop],args=ms_data+tuple([krr_model_as_list]))
+        if v>=1: print("Microstructural property {} ...".format(ms_prop))
+        result = minimize(train_cohort_model,
+                          next_alpha[ms_prop],
+                          args=ms_data+tuple([krr_model_as_list]),
+                          method="L-BFGS-B",
+                          bounds=[(1.e-3,None)],
+                          options={"ftol":1.e-3,
+                                   "gtol":1.e-2,
+                                   "eps":1.e-5})
         krr_model = krr_model_as_list[0]
         models[ms_prop] = krr_model
         next_alpha[ms_prop] = result.x
         if v >= 2:
             lambda_output += "{:.6f}\t".format(result.x[0])
-            error_output += "{:.6f}\t".format(result.fun)
+            try: 
+                error_output += "{:.6f}\t".format(result.fun)
+            except TypeError:
+                return result
             score_output += "{:.5f}\t".format(krr_model.score(*ms_data))
     if v >= 1: print("Done!")
     if v >= 2:
@@ -232,7 +245,7 @@ def calc_microstruc_error(sij,v=1):
         print(lambda_output)
     # Calculate the predicted phase composition. 
     K = np.empty((78,0))
-    f_pred = models["f"].predict(x_comp)
+    f_pred = models["f"].predict(x_comp).reshape(-1,1)
     for el in elements:
         K = np.c_[K,(models[el].predict(x_comp))]
     N = x_comp.shape[0]
@@ -242,5 +255,16 @@ def calc_microstruc_error(sij,v=1):
     if v >= 1:
         error_0 = (0.5 * 1.e-4*(f - f.mean(axis=0))**2 + 1.e-8*((f.mean(axis=0) * x_prc_target.mean(axis=0) - f*x_prc_target)**2).sum()).sum(axis=0)/N
         score = 1.0 - error/error_0
-        print("Microstructural error = {:.6f} score = {:.5f}\n".format(error,score))
+        print("Microstructural error = {:.6f} score = {:.5f}\n".format(error[0],score[0]))
     return error
+
+# Now minimise the microstructural error over the kernel parameters.
+v = 2 # verbosity
+sij_init = np.ones(10)
+sij_init[-1] = 0.1 # Represents the gamma parameter.
+result = minimize(calc_microstruc_error,
+                  sij_init,
+                  args=(v,),
+                  method="BFGS",
+                  options={"gtol":1.e-3,
+                           "eps":1.e-4})
