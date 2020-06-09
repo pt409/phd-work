@@ -206,6 +206,7 @@ def calc_microstruc_error(sij,v=1):
     # First update the kernel with new parameters:
     global my_kernel
     gamma, sij = sij[-1], sij[:-1]
+    sij = np.insert(sij,0,1.0) # Don't need to stretch in every possible direction.
     my_kernel.update_params(sij,gamma)    
     if v >= 1:
         print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
@@ -224,8 +225,8 @@ def calc_microstruc_error(sij,v=1):
                           args=ms_data+tuple([krr_model_as_list]),
                           method="L-BFGS-B",
                           bounds=[(1.e-3,None)],
-                          options={"ftol":1.e-3,
-                                   "gtol":1.e-2,
+                          options={"ftol":1.e-4,
+                                   "gtol":5.e-3,
                                    "eps":1.e-5})
         krr_model = krr_model_as_list[0]
         models[ms_prop] = krr_model
@@ -237,7 +238,7 @@ def calc_microstruc_error(sij,v=1):
             except TypeError:
                 return result
             score_output += "{:.5f}\t".format(krr_model.score(*ms_data))
-    if v >= 1: print("Done!")
+    if v >= 1: print("Done!\n")
     if v >= 2:
         print(output_head)
         print(score_output)
@@ -255,16 +256,16 @@ def calc_microstruc_error(sij,v=1):
     if v >= 1:
         error_0 = (0.5 * 1.e-4*(f - f.mean(axis=0))**2 + 1.e-8*((f.mean(axis=0) * x_prc_target.mean(axis=0) - f*x_prc_target)**2).sum()).sum(axis=0)/N
         score = 1.0 - error/error_0
-        print("Microstructural error = {:.6f} score = {:.5f}\n".format(error[0],score[0]))
+        print("\nMicrostructural error = {:.6f} score = {:.5f}\n".format(error[0],score[0]))
     return error
 
 # Now minimise the microstructural error over the kernel parameters.
 v = 2 # verbosity
-sij_init = np.ones(10)
+sij_init = np.ones(9)
 sij_init[-1] = 0.1 # Represents the gamma parameter.
 result = minimize(calc_microstruc_error,
                   sij_init,
                   args=(v,),
                   method="BFGS",
                   options={"gtol":1.e-3,
-                           "eps":1.e-4})
+                           "eps":1.e-3})
