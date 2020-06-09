@@ -62,6 +62,8 @@ def grab_data(header,df=df,transform_ht=False,warn_if_insuff=False,dat_range=Non
         if input_.shape[0] <= input_.shape[1]: print("Insufficient # data points (%d) for fitting.\n" % input_.shape[0])
     return np.array(input_), np.array(output)  
 
+# Get all the entries from the database with "complete" microstructure data.
+# "Complete" means complete composiiton + precipitate fraction + phase composition data.
 def get_microstructure_data(df):
     ms_df = df.copy()
     drop_indices = []
@@ -80,6 +82,16 @@ def get_microstructure_data(df):
         drop_indices += [index]
     ms_df.drop(drop_indices,inplace=True)
     return ms_df
+
+# Use in conjunction with get_microstructure to get the X,y data for machine learning purposes.
+def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],drop_na = True):
+    # Enter header as tuple in case of multiindex
+    if drop_na:
+        sub_df = df.dropna(subset=[y_header])
+    else: sub_df = df.copy()
+    y = sub_df[y_header].astype(np.float64).values
+    X = (sub_df.loc[:,("Composition","at. %")]).drop(drop_els,axis=1).astype(np.float64).values
+    return X,y
 
 # Model of coarsening rate for combining heat treatment times and temperatures.
 coarsening_rate = lambda temp,time : time*(273+temp)**(-1/3)
@@ -134,18 +146,20 @@ class cohort_model:
         
     def predict(self,X):
         if self.n_added == self.n:
-            return np.mean([model.predict(X)for model in self.cohort.items()],axis=0)
+            return np.mean([model.predict(X) for model in self.cohort.values()],axis=0)
         else: 
             print("Need {} models and have {} in cohort".format(self.n,self.n_added))
             return None
+    
+    def score(self,X,y):
+        return r2_score(y,self.predict(X))
 
 ms_df = get_microstructure_data(df)
-y = ms_df[("γ’ fraction","at. %")].values
-X = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
 
-my_kernel = special_kernel.setup(np.ones(X.shape[1]),0.1)
+# Setup initial kernel.
+my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
 
-def train_cohort_model(alpha_j,X,y):
+def train_cohort_model(alpha_j,X,y,model_loc=[None]):
     loo = LeaveOneOut()
     n = loo.get_n_splits(X)
     krr_cohort = cohort_model(n)
@@ -156,7 +170,77 @@ def train_cohort_model(alpha_j,X,y):
         krr_i = KernelRidge(alpha=alpha_j,kernel=my_kernel.kernel) # The kernel ridge regression model.
         krr_i.fit(X_train,y_train)
         dy = y_val - krr_i.predict(X_val)
-        gcv += np.dot(dy,dy)[0,0]
+        gcv += np.dot(dy,dy)
         krr_cohort.add_model(krr_i)
     gcv /= n
+    model_loc[0] = krr_cohort # This way the model can be accessed without returning it.
     return gcv
+
+#result = minimize(train_cohort_model,[0.1],args=(X,y))
+
+# Get all the data for precipitate fraction and g/g' partitioning coeff. 
+# Store as tuples in a dict for fast access.
+elements = ["Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
+ml_data_dict = {}
+for el in elements:
+    part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el)
+    if not part_coeff_header in ms_df:
+        part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ")
+    ml_data_dict[el] = get_Xy(ms_df,part_coeff_header)
+ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False)
+output_head = "        \t"+"\t".join(elements + ["f"])
+
+# Target data
+x_comp = ml_data_dict["f"][0]
+x_prc_target = (ms_df.loc[:,("γ’ composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
+f = ml_data_dict["f"][1]
+
+# Kernel ridge model for each microstructural property.
+next_alpha = {ms_prop:0.1 for ms_prop in ml_data_dict.keys()}
+models = {}
+# Define as a function for use with minimiser:
+def calc_microstruc_error(sij,v=1):
+    # v is the verbosity, 0, 1 or 2 (most verbose).
+    # First update the kernel with new parameters:
+    global my_kernel
+    gamma, sij = sij[-1], sij[:-1]
+    my_kernel.update_params(sij,gamma)    
+    if v >= 1:
+        print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
+        print("gamma =\t{:.6f}".format(gamma))
+        print("Beginning to fit kernel ridge models for microstructural properties.")
+    # Loop through each microstructural property and train optimal krr model using cv.
+    # Store some values calculated for output purposes.
+    lambda_output = "lambda =\t"
+    score_output =  "R^2    =\t"
+    error_output =  "CV err =\t"
+    for ms_prop, ms_data in ml_data_dict.items():
+        krr_model_as_list = [None]
+        result = minimize(train_cohort_model,next_alpha[ms_prop],args=ms_data+tuple([krr_model_as_list]))
+        krr_model = krr_model_as_list[0]
+        models[ms_prop] = krr_model
+        next_alpha[ms_prop] = result.x
+        if v >= 2:
+            lambda_output += "{:.6f}\t".format(result.x[0])
+            error_output += "{:.6f}\t".format(result.fun)
+            score_output += "{:.5f}\t".format(krr_model.score(*ms_data))
+    if v >= 1: print("Done!")
+    if v >= 2:
+        print(output_head)
+        print(score_output)
+        print(error_output)
+        print(lambda_output)
+    # Calculate the predicted phase composition. 
+    K = np.empty((78,0))
+    f_pred = models["f"].predict(x_comp)
+    for el in elements:
+        K = np.c_[K,(models[el].predict(x_comp))]
+    N = x_comp.shape[0]
+    mu = 1.0 # Weighting of overall precipitate fraction in the score.
+    error = (0.5 * mu * 1.e-4*(f - f_pred)**2 + 1.e-8*((f_pred * x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred) - f*x_prc_target)**2).sum()).sum(axis=0)
+    error /= N
+    if v >= 1:
+        error_0 = (0.5 * 1.e-4*(f - f.mean(axis=0))**2 + 1.e-8*((f.mean(axis=0) * x_prc_target.mean(axis=0) - f*x_prc_target)**2).sum()).sum(axis=0)/N
+        score = 1.0 - error/error_0
+        print("Microstructural error = {:.6f} score = {:.5f}\n".format(error,score))
+    return error
