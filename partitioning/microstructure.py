@@ -18,6 +18,11 @@ from sklearn.kernel_ridge import KernelRidge
 
 from scipy.optimize import minimize
 
+from copy import deepcopy,copy
+
+# Some options.
+incl_ht = True
+
 # Read in a processed dataset.
 df = pd.read_csv("../datasets/processing/processed_alloy_database_v2.csv",header=[0,1,2])
 
@@ -64,7 +69,7 @@ def grab_data(header,df=df,transform_ht=False,warn_if_insuff=False,dat_range=Non
 
 # Get all the entries from the database with "complete" microstructure data.
 # "Complete" means complete composiiton + precipitate fraction + phase composition data.
-def get_microstructure_data(df):
+def get_microstructure_data(df,drop_duplicate_comps=False):
     ms_df = df.copy()
     drop_indices = []
     for index,row in df.iterrows():
@@ -81,22 +86,36 @@ def get_microstructure_data(df):
                             continue
         drop_indices += [index]
     ms_df.drop(drop_indices,inplace=True)
+    if drop_duplicate_comps:
+        ms_df = ms_df.loc[ms_df[("Composition","at. %")].drop_duplicates().index]
     return ms_df
 
 # Use in conjunction with get_microstructure to get the X,y data for machine learning purposes.
-def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],drop_na = True,flatten=False):
+def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
+           min_max=None,drop_na=True,flatten=False,ht=False):
     # Enter header as tuple in case of multiindex
+    # drop empty rows
     if drop_na:
         sub_df = df.dropna(subset=[y_header])
     else: sub_df = df.copy()
+    # drop rows less/greater than certain min/max values
+    if min_max:
+        min_, max_ = tuple(min_max)
+        if min_: sub_df = sub_df[sub_df[y_header] >= min_] # Min
+        if max_: sub_df = sub_df[sub_df[y_header] <= max_] # Max
     y = sub_df[y_header].astype(np.float64).values
     if flatten and len(y.shape) > 1 and y.shape[-1] == 1:
         y = y.flatten()
-    X = (sub_df.loc[:,("Composition","at. %")]).drop(drop_els,axis=1).astype(np.float64).values
+    X1 = (sub_df.loc[:,("Composition","at. %")]).drop(drop_els,axis=1).astype(np.float64).values
+    if ht:
+        X0 = sub_df.loc[:,("Precipitation heat treatment")]
+        col_order = sorted(X0.columns.tolist(),key = lambda h: h[1])
+        X0 = X0[col_order].replace("-",0.0).astype(np.float64).values
+        X0[:,:3] += 273.
+        X = np.append(X0,X1,axis=1)
+    else:
+        X = X1
     return X,y
-
-# Model of coarsening rate for combining heat treatment times and temperatures.
-coarsening_rate = lambda temp,time : time*(273+temp)**(-1/3)
 
 # Class to define the unique kernel used.
 class special_kernel :
@@ -130,6 +149,45 @@ class special_kernel :
         new_instance = cls(si,gamma,dim)
         new_instance.construct_trans()
         return new_instance
+
+# A special kernel to deal with having composition AND heat treatment.
+class multi_kernel(special_kernel):
+    def __init__(self,si,gamma0,gamma1,gamma2,gamma3,comp_dim,ht_dim):
+        # ht_dim is the number of heat treatments (temp+time)
+        special_kernel.__init__(self,si,gamma0,comp_dim)
+        self.gamma1 = gamma1
+        self.gamma2 = gamma2
+        self.gamma3 = gamma3
+        self.ht_dim = ht_dim
+    
+    def kernel(self,x,y):
+        T0,t0,x0 = self.split_vector(x)
+        T1,t1,x1 = self.split_vector(y)
+        return np.exp(-self.gamma *np.linalg.norm(self.M@(x0-x1),1)
+                      -self.gamma1*np.dot(t0-t1,t0-t1)
+                      -self.gamma2*np.dot(T0-T1,T0-T1)
+                      -self.gamma3*np.dot(T0*t0-T1*t1,T0*t0-T1*t1))
+    
+    def update_params(self,si,gamma0,gamma1,gamma2,gamma3):
+        self.S = np.diag(np.append(si,1))
+        self.gamma  = gamma0
+        self.gamma1 = gamma1
+        self.gamma2 = gamma2
+        self.gamma3 = gamma3
+        self.construct_trans()
+    
+    def split_vector(self,x):
+        t = x[:self.ht_dim]
+        T = x[self.ht_dim:2*self.ht_dim]
+        x0 = x[2*self.ht_dim:]
+        return t,T,x0
+    
+    @classmethod
+    def setup(cls,si,gamma0,gamma1,gamma2,gamma3,ht_dim):
+        comp_dim = si.shape[0]
+        new_instance = cls(si,gamma0,gamma1,gamma2,gamma3,comp_dim,ht_dim)
+        new_instance.construct_trans()
+        return new_instance
     
 # Wrapper for sklearn predictor when there are n models in a cohort and prediction is the mean one.
 class cohort_model:
@@ -156,12 +214,16 @@ class cohort_model:
     def score(self,X,y):
         return r2_score(y,self.predict(X))
 
-ms_df = get_microstructure_data(df)
+# Process database in order to get all the microstructural data.
+ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht))
 
 # Setup initial kernel.
-my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
+if incl_ht:
+    my_kernel = multi_kernel.setup(np.ones(9),0.1,0.1,0.1,0.1,3)
+else:
+    my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
 
-def train_cohort_model(alpha_j,X,y,model_loc=[None]):
+def train_cohort_model(alpha_j,X,y,return_model=False):
     loo = LeaveOneOut()
     n = loo.get_n_splits(X)
     krr_cohort = cohort_model(n)
@@ -175,8 +237,10 @@ def train_cohort_model(alpha_j,X,y,model_loc=[None]):
         gcv += np.dot(dy,dy)/(dy.shape[0])
         krr_cohort.add_model(krr_i)
     gcv /= n
-    model_loc[0] = krr_cohort # This way the model can be accessed without returning it.
-    return gcv
+    if return_model:
+        return krr_cohort # This way the model can be accessed without returning it.
+    else:
+        return gcv
 
 #result = minimize(train_cohort_model,[0.1],args=(X,y))
 
@@ -188,29 +252,36 @@ for el in elements:
     part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el)
     if not part_coeff_header in ms_df:
         part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ")
-    ml_data_dict[el] = get_Xy(ms_df,part_coeff_header)
-ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True)
+    ml_data_dict[el] = get_Xy(ms_df,part_coeff_header,min_max=[0.0,100.0],ht=incl_ht)
+ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
 output_head = "        \t"+"\t".join(elements + ["f"])
 
 # Target data
-x_comp = ml_data_dict["f"][0]
+X_ms = ml_data_dict["f"][0]
+x_comp = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
 x_prc_target = (ms_df.loc[:,("γ’ composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
 f = ml_data_dict["f"][1].reshape(-1,1)
+N = x_comp.shape[0]
 
 # Kernel ridge model for each microstructural property.
 next_alpha = {ms_prop:0.1 for ms_prop in ml_data_dict.keys()}
 models = {}
+opt_models = {}
+best_error = np.inf
 # Define as a function for use with minimiser:
 def calc_microstruc_error(sij,v=1):
     # v is the verbosity, 0, 1 or 2 (most verbose).
     # First update the kernel with new parameters:
     global my_kernel
-    gamma, sij = sij[-1], sij[:-1]
+    if incl_ht:
+        gamma, sij = tuple(sij[-4:]), sij[:-4]
+    else:
+        gamma, sij = tuple(sij[-1:]), sij[:-1]
     sij = np.insert(sij,0,1.0) # Don't need to stretch in every possible direction.
-    my_kernel.update_params(sij,gamma)    
+    my_kernel.update_params(sij,*gamma)    
     if v >= 1:
         print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
-        print("gamma =\t{:.6f}".format(gamma))
+        print("gamma =\t"+("\t".join("{:.6f}".format(_) for _ in gamma)))
         print("Beginning to fit kernel ridge models for microstructural properties.")
     # Loop through each microstructural property and train optimal krr model using cv.
     # Store some values calculated for output purposes.
@@ -218,19 +289,20 @@ def calc_microstruc_error(sij,v=1):
     score_output =  "R^2    =\t"
     error_output =  "CV err =\t"
     for ms_prop, ms_data in ml_data_dict.items():
-        krr_model_as_list = [None]
+        
         if v>=1: print("Microstructural property {} ...".format(ms_prop))
         result = minimize(train_cohort_model,
                           next_alpha[ms_prop],
-                          args=ms_data+tuple([krr_model_as_list]),
+                          args=ms_data,
                           method="L-BFGS-B",
-                          bounds=[(1.e-3,None)],
-                          options={"ftol":1.e-4,
-                                   "gtol":5.e-3,
+                          bounds=[(1.e-9,None)],
+                          options={"ftol":3.e-5,
+                                   "gtol":1.e-5,
                                    "eps":1.e-5})
-        krr_model = krr_model_as_list[0]
+        opt_alpha = result.x
+        next_alpha[ms_prop] = opt_alpha
+        krr_model = train_cohort_model(opt_alpha,*ms_data,return_model=True)
         models[ms_prop] = krr_model
-        next_alpha[ms_prop] = result.x
         if v >= 2:
             lambda_output += "{:.6f}\t".format(result.x[0])
             try: 
@@ -245,11 +317,11 @@ def calc_microstruc_error(sij,v=1):
         print(error_output)
         print(lambda_output)
     # Calculate the predicted phase composition. 
-    K = np.empty((78,0))
-    f_pred = models["f"].predict(x_comp).reshape(-1,1)
-    for el in elements:
-        K = np.c_[K,(models[el].predict(x_comp))]
     N = x_comp.shape[0]
+    K = np.empty((N,0))
+    f_pred = models["f"].predict(X_ms).reshape(-1,1)
+    for el in elements:
+        K = np.c_[K,(models[el].predict(X_ms))]
     mu = 1.0 # Weighting of overall precipitate fraction in the score.
     error = (0.5 * mu * 1.e-4*(f - f_pred)**2 + 1.e-8*((f_pred * x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred) - f*x_prc_target)**2).sum()).sum(axis=0)
     error /= N
@@ -257,15 +329,26 @@ def calc_microstruc_error(sij,v=1):
         error_0 = (0.5 * 1.e-4*(f - f.mean(axis=0))**2 + 1.e-8*((f.mean(axis=0) * x_prc_target.mean(axis=0) - f*x_prc_target)**2).sum()).sum(axis=0)/N
         score = 1.0 - error/error_0
         print("\nMicrostructural error = {:.6f} score = {:.5f}\n".format(error[0],score[0]))
+    # Store models if the error is lowest yet.
+    global best_error
+    global opt_models
+    if error < best_error:
+        opt_models = deepcopy(models)
+        best_error = copy(error)
+    # Finally return error
     return error
 
 # Now minimise the microstructural error over the kernel parameters.
 v = 2 # verbosity
-sij_init = np.ones(9)
-sij_init[-1] = 0.1 # Represents the gamma parameter.
+if incl_ht:
+    sij_init = np.ones(12)
+    sij_init[-4:] = 0.15 # Represents the 4 gamma parameters.
+else:
+    sij_init = np.ones(9)
+    sij_init[-1] = 0.1 # Represents the gamma parameter.
 result = minimize(calc_microstruc_error,
                   sij_init,
                   args=(v,),
                   method="BFGS",
-                  options={"gtol":1.e-3,
+                  options={"gtol":1.e-4,
                            "eps":1.e-3})
