@@ -17,7 +17,7 @@ from copy import deepcopy
 # Read in the correct input files
 # After calling the script these should be:
 #    constr eam_params [list of element types]
-#    fit eam_params fitting_scripts [list of element types]
+#    fit eam_params fitting_scripts balance_element [list of element type: k_min,k_max,s_min,s_max]
 run_type = None
 run_option = sys.argv[1]
 if "constr" in run_option:
@@ -28,8 +28,12 @@ elif "fit" in run_option:
     run_type = 1
     param_file = sys.argv[2]
     fitting_scripts = sys.argv[3]
-    types = sys.argv[4:]
-
+    bal_type = sys.argv[4]
+    rest = np.array(sys.argv[5:]).reshape(-1,5)
+    types = bal_type + [i[0] for i in rest]
+    k_s_bounds = np.delete(rest,0,axis=1).astype(np.float64).reshape(-1,2)
+    k_s_bounds = np.append(k_s_bounds[::2],k_s_bounds[1::2],axis=0)
+    
 Lammps.command(6,lammps_path="lammps")
 
 df = pd.read_table(param_file)
@@ -162,12 +166,12 @@ def transform_eam(types,k,s,tab_dens,tab_pots,tab_embs,
 
 # Read in an input file listing lammps scripts and target properties.
 def read_in_fitting(file_in):
-    script_targets = {}
+    script_targets = {} # Tuples of target, tol
     script_insts = {}
     with open(file_in,"r") as f:
         for l in f:
             row = l.split()
-            script_targets[row[0]] = np.array(row[1:],dtype=np.float64)
+            script_targets[row[0]] = np.array(row[1:],dtype=np.float64).reshape((-1,2))
             script_insts[row[0]] = Lammps.setup(row[0])
     return script_targets,script_insts
 
@@ -196,10 +200,11 @@ def objective_function(x,types,
         predictions = lmp_insts[script].read_log(prop_list,np_out=False,incl_step=False)
         # Loop throught predicted properties---check if lammps actually returned them---and work out cost.
         for j,pred in enumerate(predictions):
-            actual = lmp_scripts[script][j]
+            actual = lmp_scripts[script][j][0]
+            tol = lmp_scripts[script][j][1]
             if pred: 
                 print("Target value = {:.4f}\tpredicted value = {:.4f}\n".format(actual,pred[-1]))
-                cost += ((actual-pred[-1])/actual)**2
+                cost += ((actual-pred[-1])/tol)**2
     print("Total cost = {:.5f} for this iteration.\n".format(cost))
     trial_num += 1
     return cost
@@ -218,7 +223,7 @@ if run_type == 1:
     out_0 = initial_eam(types,name=eam_name_0)
     out_1 = read_in_fitting(fitting_scripts) 
     # Use simulated annealing to fit k,s.
-    fit_result = dual_annealing(objective_function,np.array([[-2.0,1.0],[0.6,1.4]]),
+    fit_result = dual_annealing(objective_function,k_s_bounds,
                    maxiter=5000,
                    args=tuple([types])+out_0+out_1,
                    maxfun=100000,
