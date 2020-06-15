@@ -30,7 +30,7 @@ elif "fit" in run_option:
     fitting_scripts = sys.argv[3]
     bal_type = sys.argv[4]
     rest = np.array(sys.argv[5:]).reshape(-1,5)
-    types = bal_type + [i[0] for i in rest]
+    types = [bal_type] + [i[0] for i in rest]
     k_s_bounds = np.delete(rest,0,axis=1).astype(np.float64).reshape(-1,2)
     k_s_bounds = np.append(k_s_bounds[::2],k_s_bounds[1::2],axis=0)
     
@@ -227,7 +227,10 @@ if run_type == 1:
                    maxiter=5000,
                    args=tuple([types])+out_0+out_1,
                    maxfun=100000,
-                   local_search_options={"method":"Nelder-Mead"})
+                   local_search_options={"method":"BFGS",
+                                         "options":{"gtol":1.e-2,
+                                                    "eps":5.e-4,
+                                                    "maxiter":12}})
     k,s = tuple(np.c_[[0.,1.],(fit_result.x).reshape(2,-1)])
     print("###### OPTIMAL RESULT ######\n")
     print("\t".join(["k_{} = {:.5f}".format(el,k_el) for el,k_el in zip(types,k)])+"\n")

@@ -8,12 +8,12 @@ Created on Mon Jun  1 15:44:29 2020
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from mendeleev import element
+#import matplotlib.pyplot as plt
+#from mendeleev import element
 
-from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
-from sklearn.metrics import r2_score, mean_squared_error
-from sklearn.model_selection import LeaveOneOut, cross_validate
+#from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
+from sklearn.metrics import r2_score # mean_squared_error
+from sklearn.model_selection import LeaveOneOut # cross_validate
 from sklearn.kernel_ridge import KernelRidge
 
 from scipy.optimize import minimize
@@ -22,6 +22,7 @@ from copy import deepcopy,copy
 
 # Some options.
 incl_ht = True
+squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 
 # Read in a processed dataset.
 df = pd.read_csv("../datasets/processing/processed_alloy_database_v2.csv",header=[0,1,2])
@@ -152,28 +153,22 @@ class special_kernel :
 
 # A special kernel to deal with having composition AND heat treatment.
 class multi_kernel(special_kernel):
-    def __init__(self,si,gamma0,gamma1,gamma2,gamma3,comp_dim,ht_dim):
+    def __init__(self,si,gamma0,gamma1,comp_dim,ht_dim):
         # ht_dim is the number of heat treatments (temp+time)
         special_kernel.__init__(self,si,gamma0,comp_dim)
         self.gamma1 = gamma1
-        self.gamma2 = gamma2
-        self.gamma3 = gamma3
         self.ht_dim = ht_dim
     
     def kernel(self,x,y):
         T0,t0,x0 = self.split_vector(x)
         T1,t1,x1 = self.split_vector(y)
         return np.exp(-self.gamma *np.linalg.norm(self.M@(x0-x1),1)
-                      -self.gamma1*np.dot(t0-t1,t0-t1)
-                      -self.gamma2*np.dot(T0-T1,T0-T1)
-                      -self.gamma3*np.dot(T0*t0-T1*t1,T0*t0-T1*t1))
+                      -self.gamma1*np.dot(T0*t0-T1*t1,T0*t0-T1*t1))
     
-    def update_params(self,si,gamma0,gamma1,gamma2,gamma3):
+    def update_params(self,si,gamma0,gamma1):
         self.S = np.diag(np.append(si,1))
         self.gamma  = gamma0
         self.gamma1 = gamma1
-        self.gamma2 = gamma2
-        self.gamma3 = gamma3
         self.construct_trans()
     
     def split_vector(self,x):
@@ -183,9 +178,9 @@ class multi_kernel(special_kernel):
         return t,T,x0
     
     @classmethod
-    def setup(cls,si,gamma0,gamma1,gamma2,gamma3,ht_dim):
+    def setup(cls,si,gamma0,gamma1,ht_dim):
         comp_dim = si.shape[0]
-        new_instance = cls(si,gamma0,gamma1,gamma2,gamma3,comp_dim,ht_dim)
+        new_instance = cls(si,gamma0,gamma1,comp_dim,ht_dim)
         new_instance.construct_trans()
         return new_instance
     
@@ -219,7 +214,7 @@ ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht))
 
 # Setup initial kernel.
 if incl_ht:
-    my_kernel = multi_kernel.setup(np.ones(9),0.1,0.1,0.1,0.1,3)
+    my_kernel = multi_kernel.setup(np.ones(9),0.1,0.1,3)
 else:
     my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
 
@@ -274,10 +269,19 @@ def calc_microstruc_error(sij,v=1):
     # First update the kernel with new parameters:
     global my_kernel
     if incl_ht:
-        gamma, sij = tuple(sij[-4:]), sij[:-4]
+        if squash_dof:
+            gamma, sij = tuple(sij[-2:]), sij[:-2]
+            sij = np.insert(sij,0,1.0) # Don't need to stretch in every possible direction.
+        else:
+            gamma = tuple(sij[-2:])
+            sij = np.ones(9)
     else:
-        gamma, sij = tuple(sij[-1:]), sij[:-1]
-    sij = np.insert(sij,0,1.0) # Don't need to stretch in every possible direction.
+        if squash_dof:
+            gamma, sij = tuple(sij[-1:]), sij[:-1]
+            sij = np.insert(sij,0,1.0) # Don't need to stretch in every possible direction.
+        else:
+            gamma = tuple(sij[-1:])
+            sij = np.ones(9)
     my_kernel.update_params(sij,*gamma)    
     if v >= 1:
         print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
@@ -323,10 +327,12 @@ def calc_microstruc_error(sij,v=1):
     for el in elements:
         K = np.c_[K,(models[el].predict(X_ms))]
     mu = 1.0 # Weighting of overall precipitate fraction in the score.
-    error = (0.5 * mu * 1.e-4*(f - f_pred)**2 + 1.e-8*((f_pred * x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred) - f*x_prc_target)**2).sum()).sum(axis=0)
+    error = (0.5 * mu * 1.e-4*(f - f_pred)**2 
+             + 1.e-8*((f_pred * x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred) - f*x_prc_target)**2).sum()).sum(axis=0)
     error /= N
     if v >= 1:
-        error_0 = (0.5 * 1.e-4*(f - f.mean(axis=0))**2 + 1.e-8*((f.mean(axis=0) * x_prc_target.mean(axis=0) - f*x_prc_target)**2).sum()).sum(axis=0)/N
+        error_0 = (0.5 * 1.e-4*(f - f.mean(axis=0))**2 
+                   + 1.e-8*((f.mean(axis=0) * x_prc_target.mean(axis=0) - f*x_prc_target)**2).sum()).sum(axis=0)/N
         score = 1.0 - error/error_0
         print("\nMicrostructural error = {:.6f} score = {:.5f}\n".format(error[0],score[0]))
     # Store models if the error is lowest yet.
@@ -341,11 +347,19 @@ def calc_microstruc_error(sij,v=1):
 # Now minimise the microstructural error over the kernel parameters.
 v = 2 # verbosity
 if incl_ht:
-    sij_init = np.ones(12)
-    sij_init[-4:] = 0.15 # Represents the 4 gamma parameters.
+    if squash_dof:
+        sij_init = np.ones(10)
+        sij_init[-2] = 0.1 # Represents the gamma parameters.
+        sij_init[-1] = 1.e-6 # The gamma1 parameter.
+    else:
+        sij_init = 0.1*np.ones(2)
+        sij_init[-1] = 1.e-3 # The gamma1 parameter.
 else:
-    sij_init = np.ones(9)
-    sij_init[-1] = 0.1 # Represents the gamma parameter.
+    if squash_dof:
+        sij_init = np.ones(9)
+        sij_init[-1] = 0.1 # Represents the gamma parameter.
+    else:
+        sij_init = 0.1*np.ones(1)
 result = minimize(calc_microstruc_error,
                   sij_init,
                   args=(v,),
