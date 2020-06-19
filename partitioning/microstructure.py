@@ -21,11 +21,12 @@ from scipy.optimize import minimize
 from copy import deepcopy,copy
 
 # Some options.
-incl_ht = True
+incl_ht = False
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 
 # Read in a processed dataset.
 df = pd.read_csv("../datasets/processing/processed_alloy_database_v2.csv",header=[0,1,2])
+df.set_index("Name")
 
 def check_if_valid(input_,allow_all_null=False):
     if np.prod("-" == input_) and not allow_all_null:
@@ -208,6 +209,18 @@ class cohort_model:
     
     def score(self,X,y):
         return r2_score(y,self.predict(X))
+    
+# Predict composition of precipitate phase from partitioning coefficients
+def predict_phase(models,x_comp,X,elements=["Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]):
+    # X is the feature vector (composition or composition & heat treatments)
+    # x_comp is the composition of the overall alloy
+    N = x_comp.shape[0]
+    K = np.empty((N,0))
+    f_pred = models["f"].predict(X).reshape(-1,1)
+    for el in elements:
+        K = np.c_[K,(models[el].predict(X))]
+    x_prc = x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred)
+    return x_prc, f_pred
 
 # Process database in order to get all the microstructural data.
 ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht))
@@ -349,15 +362,15 @@ v = 2 # verbosity
 if incl_ht:
     if squash_dof:
         sij_init = np.ones(10)
-        sij_init[-2] = 0.1 # Represents the gamma parameters.
-        sij_init[-1] = 1.e-6 # The gamma1 parameter.
+        sij_init[-2] = 0.15 # Represents the gamma parameters.
+        sij_init[-1] = 1.e-3 # The gamma1 parameter.
     else:
         sij_init = 0.1*np.ones(2)
         sij_init[-1] = 1.e-3 # The gamma1 parameter.
 else:
     if squash_dof:
         sij_init = np.ones(9)
-        sij_init[-1] = 0.1 # Represents the gamma parameter.
+        sij_init[-1] = 0.15 # Represents the gamma parameter.
     else:
         sij_init = 0.1*np.ones(1)
 result = minimize(calc_microstruc_error,

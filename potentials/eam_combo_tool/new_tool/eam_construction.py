@@ -35,7 +35,8 @@ elif "fit" in run_option:
     k_s_bounds = np.append(k_s_bounds[::2],k_s_bounds[1::2],axis=0)
     
 Lammps.command(6,lammps_path="lammps")
-
+if not run_type:
+    param_file = "eam_params"
 df = pd.read_table(param_file)
 df = df.set_index("element")
 df = df.rename(columns={"lambda":"lambda0"})
@@ -227,6 +228,7 @@ if run_type == 1:
                    maxiter=5000,
                    args=tuple([types])+out_0+out_1,
                    maxfun=100000,
+                   accept=-3.0,
                    local_search_options={"method":"BFGS",
                                          "options":{"gtol":1.e-2,
                                                     "eps":5.e-4,

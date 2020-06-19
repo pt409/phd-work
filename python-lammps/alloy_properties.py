@@ -12,7 +12,7 @@ from simple_lammps_wrapper import Lammps, alloy_md_properties
 
 import numpy as np
 
-Lammps.command(20)
+Lammps.command(20,lammps_path="lmp")
 
 N = 20
 
