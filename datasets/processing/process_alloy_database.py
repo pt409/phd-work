@@ -13,6 +13,8 @@ import sys
 
 input_database = sys.argv[1]
 output_database = sys.argv[2]
+if "creep" in sys.argv[2:]:
+    do_creep_processing = False
 
 df = pd.read_excel(input_database,engine="odf",header=[0,1,2])
 els = df["Composition","wt. %"].columns.values
@@ -74,22 +76,22 @@ def replace_if_new_value(input_old,input_new):
 # Process compositions (nominal, matrix, and precipitate as well as precipitate fractions.)
 def process_composition(index,row,return_codes=False,inf_value=1e3,correct_if_neg=False):
     # Convert any wt. % compositions to at. % and vice versa
-    nom_wt_comp = row["Composition","wt. %"].values
-    nom_at_comp = row["Composition","at. %"].values
+    nom_wt_comp = row[("Composition","wt. %")].values
+    nom_at_comp = row[("Composition","at. %")].values
     nom_wt_comp, nom_at_comp, nom_rtn_code = calc_wt_at_vv(nom_wt_comp,nom_at_comp,masses)
-    mtx_wt_comp = row["γ composition","wt. %"].values
-    mtx_at_comp = row["γ composition","at. %"].values
+    mtx_wt_comp = row[("γ composition","wt. %")].values
+    mtx_at_comp = row[("γ composition","at. %")].values
     mtx_wt_comp, mtx_at_comp, mtx_rtn_code = calc_wt_at_vv(mtx_wt_comp,mtx_at_comp,masses)
-    prc_wt_comp = row["γ’ composition","wt. %"].values
-    prc_at_comp = row["γ’ composition","at. %"].values
+    prc_wt_comp = row[("γ’ composition","wt. %")].values
+    prc_at_comp = row[("γ’ composition","at. %")].values
     prc_wt_comp, prc_at_comp, prc_rtn_code = calc_wt_at_vv(prc_wt_comp,prc_at_comp,masses)
     # Get the partitioning coefficients
-    K_part_wt = read_in_part_coeff(row["γ/γ’ partitioning ratio","wt. %"].values)
-    K_part_at = read_in_part_coeff(row["γ/γ’ partitioning ratio","at. %"].values)
+    K_part_wt = read_in_part_coeff(row[("γ/γ’ partitioning ratio","wt. %")].values)
+    K_part_at = read_in_part_coeff(row[("γ/γ’ partitioning ratio","at. %")].values)
     # Get the wt, at, vol percentages of the precipitates
-    wt_frac,wt_frac_rtn_code=check_if_valid(row["γ’ fraction","wt. %"])
-    at_frac,at_frac_rtn_code=check_if_valid(row["γ’ fraction","at. %"])
-    vl_frac,vl_frac_rtn_code=check_if_valid(row["γ’ fraction","vol. %"])
+    wt_frac,wt_frac_rtn_code=check_if_valid(row[("γ’ fraction","wt. %")])
+    at_frac,at_frac_rtn_code=check_if_valid(row[("γ’ fraction","at. %")])
+    vl_frac,vl_frac_rtn_code=check_if_valid(row[("γ’ fraction","vol. %")])
     # To a good approximation the at. % and vol. % are the same
     at_frac = 1*vl_frac if vl_frac_rtn_code==2 and at_frac_rtn_code!=2 else at_frac    
     at_frac_rtn_code = min(at_frac_rtn_code*vl_frac_rtn_code,2)
@@ -253,24 +255,25 @@ def bin_stresses(stress_values,bin_size=5):
 df_proc = df.copy()
 
 # Loop through dataframe w/o modification to get all the stress values
-stresses = []
-for index, row in df.iterrows():
-    new_creep_data, stresses_found = process_creep(index,row,count_stresses=True)
-    stresses += stresses_found
-# Bin the stresses that were found
-bins,vals = bin_stresses(stresses)
-bin_number = len(vals)
-# Modify dataframe
-entries_per_test = 10
-lvl_1_names = list(df["Creep life"].columns[:entries_per_test].get_level_values(0))
-current_cols = np.nonzero(df.columns.get_loc("Creep life"))[0]
-orig_bin_num = len(current_cols)//entries_per_test
-for k in range(bin_number-orig_bin_num):
-    col_0 = current_cols[-1]+k*entries_per_test+1
-    df_proc.insert(int(col_0),("Creep life","Test conditions",'Temp (ºC) .%d' %(k+orig_bin_num)),np.nan)
-    df_proc.insert(int(col_0)+1,("Creep life","Test conditions",'Stress (MPa) .%d' %(k+orig_bin_num)),np.nan)
-    for l,name in enumerate(lvl_1_names[2:]):
-        df_proc.insert(int(col_0+l+2),("Creep life",name,"Unnamed: %d_level_2" %(col_0+l+2)),np.nan)
+if do_creep_processing:
+    stresses = []
+    for index, row in df.iterrows():
+        new_creep_data, stresses_found = process_creep(index,row,count_stresses=True)
+        stresses += stresses_found
+    # Bin the stresses that were found
+    bins,vals = bin_stresses(stresses)
+    bin_number = len(vals)
+    # Modify dataframe
+    entries_per_test = 10
+    lvl_1_names = list(df["Creep life"].columns[:entries_per_test].get_level_values(0))
+    current_cols = np.nonzero(df.columns.get_loc("Creep life"))[0]
+    orig_bin_num = len(current_cols)//entries_per_test
+    for k in range(bin_number-orig_bin_num):
+        col_0 = current_cols[-1]+k*entries_per_test+1
+        df_proc.insert(int(col_0),("Creep life","Test conditions",'Temp (ºC) .%d' %(k+orig_bin_num)),np.nan)
+        df_proc.insert(int(col_0)+1,("Creep life","Test conditions",'Stress (MPa) .%d' %(k+orig_bin_num)),np.nan)
+        for l,name in enumerate(lvl_1_names[2:]):
+            df_proc.insert(int(col_0+l+2),("Creep life",name,"Unnamed: %d_level_2" %(col_0+l+2)),np.nan)
 
 # Process the entire database and write it to the copied database.
 for index, row in df_proc.iterrows():
@@ -288,8 +291,9 @@ for index, row in df_proc.iterrows():
     df_proc.loc[index,("γ/γ’ partitioning ratio","wt. %")] = K_part_wt
     df_proc.loc[index,("γ/γ’ partitioning ratio","at. %")] = K_part_at
     # Do the same thing for creep data
-    new_creep_data = process_creep(index,row,stress_bins=bins)
-    df_proc.loc[index,"Creep life"] = new_creep_data
+    if do_creep_processing:
+        new_creep_data = process_creep(index,row,stress_bins=bins)
+        df_proc.loc[index,"Creep life"] = new_creep_data
     # ... and for misfit data
     a,a_,misfits = process_misfit(index,row)
     df_proc.loc[index,"γ lattice param"] = a
