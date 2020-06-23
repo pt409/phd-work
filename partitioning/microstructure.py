@@ -8,8 +8,7 @@ Created on Mon Jun  1 15:44:29 2020
 
 import numpy as np
 import pandas as pd
-#import matplotlib.pyplot as plt
-#from mendeleev import element
+import pickle
 
 #from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
 from sklearn.metrics import r2_score # mean_squared_error
@@ -21,7 +20,7 @@ from scipy.optimize import minimize
 from copy import deepcopy,copy
 
 # Some options.
-incl_ht = False
+incl_ht = True
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 
 # Read in a processed dataset.
@@ -164,7 +163,7 @@ class multi_kernel(special_kernel):
         T0,t0,x0 = self.split_vector(x)
         T1,t1,x1 = self.split_vector(y)
         return np.exp(-self.gamma *np.linalg.norm(self.M@(x0-x1),1)
-                      -self.gamma1*np.dot(T0*t0-T1*t1,T0*t0-T1*t1))
+                      -self.gamma1*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1)))
     
     def update_params(self,si,gamma0,gamma1):
         self.S = np.diag(np.append(si,1))
@@ -220,6 +219,7 @@ def predict_phase(models,x_comp,X,elements=["Cr","Co","Re","Ru","Al","Ta","W","T
     for el in elements:
         K = np.c_[K,(models[el].predict(X))]
     x_prc = x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred)
+    x_prc = np.c_[100.0-x_prc.sum(axis=1),x_prc] # Add on bal element composition
     return x_prc, f_pred
 
 # Process database in order to get all the microstructural data.
@@ -262,14 +262,17 @@ for el in elements:
         part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ")
     ml_data_dict[el] = get_Xy(ms_df,part_coeff_header,min_max=[0.0,100.0],ht=incl_ht)
 ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
-output_head = "        \t"+"\t".join(elements + ["f"])
+output_head = "        \t"+"       \t".join(elements + ["f"])
 
 # Target data
 X_ms = ml_data_dict["f"][0]
 x_comp = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
-x_prc_target = (ms_df.loc[:,("γ’ composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
+x_prc_target = (ms_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
 f = ml_data_dict["f"][1].reshape(-1,1)
 N = x_comp.shape[0]
+# can also calculate an error if mean compositions were used here.
+mu = 3. # Weighting of overall precipitate fraction in the score.
+error_0 = (0.5*mu*(f-f.mean())**2 + (1.e-4*(f.mean()*x_prc_target.mean(axis=0)-f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
 
 # Kernel ridge model for each microstructural property.
 next_alpha = {ms_prop:0.1 for ms_prop in ml_data_dict.keys()}
@@ -297,14 +300,15 @@ def calc_microstruc_error(sij,v=1):
             sij = np.ones(9)
     my_kernel.update_params(sij,*gamma)    
     if v >= 1:
-        print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
-        print("gamma =\t"+("\t".join("{:.6f}".format(_) for _ in gamma)))
+        if squash_dof:
+            print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
+        print("gamma =\t"+("\t".join("{:.6e}".format(_) for _ in gamma)))
         print("Beginning to fit kernel ridge models for microstructural properties.")
     # Loop through each microstructural property and train optimal krr model using cv.
     # Store some values calculated for output purposes.
     lambda_output = "lambda =\t"
     score_output =  "R^2    =\t"
-    error_output =  "CV err =\t"
+    cv_output =  "CV err =\t"
     for ms_prop, ms_data in ml_data_dict.items():
         
         if v>=1: print("Microstructural property {} ...".format(ms_prop))
@@ -312,42 +316,35 @@ def calc_microstruc_error(sij,v=1):
                           next_alpha[ms_prop],
                           args=ms_data,
                           method="L-BFGS-B",
-                          bounds=[(1.e-9,None)],
-                          options={"ftol":3.e-5,
-                                   "gtol":1.e-5,
-                                   "eps":1.e-5})
+                          bounds=[(1.e-8,None)],
+                          options={"ftol":1.e-2,
+                                   "gtol":1.e-3,
+                                   "eps":1.e-4})
         opt_alpha = result.x
         next_alpha[ms_prop] = opt_alpha
         krr_model = train_cohort_model(opt_alpha,*ms_data,return_model=True)
         models[ms_prop] = krr_model
         if v >= 2:
-            lambda_output += "{:.6f}\t".format(result.x[0])
+            lambda_output += "{:.5e}\t".format(result.x[0])
             try: 
-                error_output += "{:.6f}\t".format(result.fun)
+                cv_output += "{:.5e}\t".format(result.fun)
             except TypeError:
                 return result
-            score_output += "{:.5f}\t".format(krr_model.score(*ms_data))
+            score_output += "{:.5f}   \t".format(krr_model.score(*ms_data))
     if v >= 1: print("Done!\n")
     if v >= 2:
         print(output_head)
         print(score_output)
-        print(error_output)
+        print(cv_output)
         print(lambda_output)
     # Calculate the predicted phase composition. 
-    N = x_comp.shape[0]
-    K = np.empty((N,0))
-    f_pred = models["f"].predict(X_ms).reshape(-1,1)
-    for el in elements:
-        K = np.c_[K,(models[el].predict(X_ms))]
-    mu = 1.0 # Weighting of overall precipitate fraction in the score.
-    error = (0.5 * mu * 1.e-4*(f - f_pred)**2 
-             + 1.e-8*((f_pred * x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred) - f*x_prc_target)**2).sum()).sum(axis=0)
-    error /= N
+    x_prc, f_pred = predict_phase(models,x_comp,X_ms)
+    frac_error = (0.5*(f - f_pred)**2).mean(axis=0)
+    phase_error = ((1.e-4*(f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
+    error = mu*frac_error + phase_error
     if v >= 1:
-        error_0 = (0.5 * 1.e-4*(f - f.mean(axis=0))**2 
-                   + 1.e-8*((f.mean(axis=0) * x_prc_target.mean(axis=0) - f*x_prc_target)**2).sum()).sum(axis=0)/N
         score = 1.0 - error/error_0
-        print("\nMicrostructural error = {:.6f} score = {:.5f}\n".format(error[0],score[0]))
+        print("\nFraction error = {:.6f} Phase error = {:.6f} Microstructural error = {:.6f}\nscore = {:.5f}\n".format(frac_error[0],phase_error[0],error[0],score[0]))
     # Store models if the error is lowest yet.
     global best_error
     global opt_models
@@ -362,20 +359,28 @@ v = 2 # verbosity
 if incl_ht:
     if squash_dof:
         sij_init = np.ones(10)
-        sij_init[-2] = 0.15 # Represents the gamma parameters.
-        sij_init[-1] = 1.e-3 # The gamma1 parameter.
+        sij_init[-2] = 0.1 # Represents the gamma parameters.
+        sij_init[-1] = 1.e-4 # The gamma1 parameter.
     else:
         sij_init = 0.1*np.ones(2)
-        sij_init[-1] = 1.e-3 # The gamma1 parameter.
+        sij_init[-1] = 1.e-4 # The gamma1 parameter.
 else:
     if squash_dof:
         sij_init = np.ones(9)
-        sij_init[-1] = 0.15 # Represents the gamma parameter.
+        sij_init[-1] = 0.1 # Represents the gamma parameter.
     else:
         sij_init = 0.1*np.ones(1)
+eps = 1.e-3*sij_init
 result = minimize(calc_microstruc_error,
                   sij_init,
                   args=(v,),
-                  method="BFGS",
-                  options={"gtol":1.e-4,
-                           "eps":1.e-3})
+                  method="L-BFGS-B",
+                  bounds=[(0.,None),(0.,None)],
+                  options={"ftol":2.e-3,
+                           "gtol":1.e-3,
+                           "eps":eps})
+# Pickle the optimised models that were found.
+with open("final_models.pkl","wb") as pickle_out:
+    pickle.dump(opt_models,pickle_out)
+print("\nResult of fitting kernel parameters:\n")
+print(result)
