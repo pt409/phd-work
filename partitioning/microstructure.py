@@ -24,7 +24,7 @@ incl_ht = True
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 
 # Read in a processed dataset.
-df = pd.read_csv("../datasets/processing/processed_alloy_database_v2.csv",header=[0,1,2])
+df = pd.read_csv("../datasets/processing/processed_alloy_database_v3.csv",header=[0,1,2])
 df.set_index("Name")
 
 def check_if_valid(input_,allow_all_null=False):
@@ -153,22 +153,22 @@ class special_kernel :
 
 # A special kernel to deal with having composition AND heat treatment.
 class multi_kernel(special_kernel):
-    def __init__(self,si,gamma0,gamma1,comp_dim,ht_dim):
+    def __init__(self,si,gamma,mu,comp_dim,ht_dim):
         # ht_dim is the number of heat treatments (temp+time)
-        special_kernel.__init__(self,si,gamma0,comp_dim)
-        self.gamma1 = gamma1
+        special_kernel.__init__(self,si,gamma,comp_dim)
+        self.mu = mu
         self.ht_dim = ht_dim
     
     def kernel(self,x,y):
         T0,t0,x0 = self.split_vector(x)
         T1,t1,x1 = self.split_vector(y)
-        return np.exp(-self.gamma *np.linalg.norm(self.M@(x0-x1),1)
-                      -self.gamma1*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1)))
+        return np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-x1),1)
+                      +self.mu*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
     
-    def update_params(self,si,gamma0,gamma1):
+    def update_params(self,si,gamma,mu):
         self.S = np.diag(np.append(si,1))
-        self.gamma  = gamma0
-        self.gamma1 = gamma1
+        self.gamma  = gamma
+        self.mu = mu
         self.construct_trans()
     
     def split_vector(self,x):
@@ -178,9 +178,9 @@ class multi_kernel(special_kernel):
         return t,T,x0
     
     @classmethod
-    def setup(cls,si,gamma0,gamma1,ht_dim):
+    def setup(cls,si,gamma,mu,ht_dim):
         comp_dim = si.shape[0]
-        new_instance = cls(si,gamma0,gamma1,comp_dim,ht_dim)
+        new_instance = cls(si,gamma,mu,comp_dim,ht_dim)
         new_instance.construct_trans()
         return new_instance
     
@@ -354,33 +354,34 @@ def calc_microstruc_error(sij,v=1):
     # Finally return error
     return error
 
-# Now minimise the microstructural error over the kernel parameters.
-v = 2 # verbosity
-if incl_ht:
-    if squash_dof:
-        sij_init = np.ones(10)
-        sij_init[-2] = 0.1 # Represents the gamma parameters.
-        sij_init[-1] = 1.e-4 # The gamma1 parameter.
+if __name__ == '__main__':
+    # Now minimise the microstructural error over the kernel parameters.
+    v = 2 # verbosity
+    if incl_ht:
+        if squash_dof:
+            sij_init = np.ones(10)
+            sij_init[-2] = 0.1 # Represents the gamma parameters.
+            sij_init[-1] = 1.e-4 # The gamma1 parameter.
+        else:
+            sij_init = 0.1*np.ones(2)
+            sij_init[-1] = 1.e-4 # The gamma1 parameter.
     else:
-        sij_init = 0.1*np.ones(2)
-        sij_init[-1] = 1.e-4 # The gamma1 parameter.
-else:
-    if squash_dof:
-        sij_init = np.ones(9)
-        sij_init[-1] = 0.1 # Represents the gamma parameter.
-    else:
-        sij_init = 0.1*np.ones(1)
-eps = 1.e-3*sij_init
-result = minimize(calc_microstruc_error,
-                  sij_init,
-                  args=(v,),
-                  method="L-BFGS-B",
-                  bounds=[(0.,None),(0.,None)],
-                  options={"ftol":2.e-3,
-                           "gtol":1.e-3,
-                           "eps":eps})
-# Pickle the optimised models that were found.
-with open("final_models.pkl","wb") as pickle_out:
-    pickle.dump(opt_models,pickle_out)
-print("\nResult of fitting kernel parameters:\n")
-print(result)
+        if squash_dof:
+            sij_init = np.ones(9)
+            sij_init[-1] = 0.1 # Represents the gamma parameter.
+        else:
+            sij_init = 0.1*np.ones(1)
+    eps = 1.e-3*sij_init
+    result = minimize(calc_microstruc_error,
+                      sij_init,
+                      args=(v,),
+                      method="L-BFGS-B",
+                      bounds=[(0.,None),(0.,None)],
+                      options={"ftol":2.e-3,
+                               "gtol":1.e-3,
+                               "eps":eps})
+    # Pickle the optimised models that were found.
+    with open("final_models.pkl","wb") as pickle_out:
+        pickle.dump(opt_models,pickle_out)
+    print("\nResult of fitting kernel parameters:\n")
+    print(result)

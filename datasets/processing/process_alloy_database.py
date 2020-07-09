@@ -14,7 +14,8 @@ import sys
 input_database = sys.argv[1]
 output_database = sys.argv[2]
 if "creep" in sys.argv[2:]:
-    do_creep_processing = False
+    do_creep_processing = True
+else: do_creep_processing = False
 
 df = pd.read_excel(input_database,engine="odf",header=[0,1,2])
 els = df["Composition","wt. %"].columns.values
