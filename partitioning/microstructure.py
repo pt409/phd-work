@@ -191,6 +191,13 @@ def predict_phase(models,x_comp,X,elements=["Cr","Co","Re","Ru","Al","Ta","W","T
     x_prc = np.c_[100.0-x_prc.sum(axis=1),x_prc] # Add on bal element composition
     return x_prc, f_pred
 
+def predict_part_coeffs(models,X,elements=["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]):
+    N = x_comp.shape[0]
+    K = np.empty((N,0))
+    for el in elements:
+        K = np.c_[K,(models[el].predict(X))]
+    return K
+
 # Process database in order to get all the microstructural data.
 ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht))
 
@@ -223,7 +230,7 @@ def train_cohort_model(alpha_j,X,y,return_model=False):
 
 # Get all the data for precipitate fraction and g/g' partitioning coeff. 
 # Store as tuples in a dict for fast access.
-elements = ["Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
+elements = ["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
 ml_data_dict = {}
 for el in elements:
     part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el)
@@ -322,6 +329,153 @@ def calc_microstruc_error(sij,v=1):
         best_error = copy(error)
     # Finally return error
     return error
+
+# Solve polynomial in f to get the precipitate fraction
+def poly_f(part_coeffs,nom_comp):
+    k0 = part_coeffs[0]
+    k = part_coeffs[1:]
+    # The polynomial, term-by-term
+    def g(f):
+        prc_comp_denom = (1-k)*f+k # A recurring term in the polynomial
+        # 1st term
+        g = f*(1-k0)*np.prod(prc_comp_denom)
+        # 2nd term
+        for i, x_i in enumerate(nom_comp):
+            g -= (f*(1-k0)+k0)*x_i*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:])
+        # 3rd term
+        g -= (1-np.sum(nom_comp)-k0)*np.prod(prc_comp_denom)
+        return g
+    return np.vectorize(g)
+
+# Derivative of the polynomial
+def polyd_f(part_coeffs,nom_comp):
+    k0 = part_coeffs[0]
+    k = part_coeffs[1:]
+    # The polynomial's derivative, term-by-term
+    def gd(f):
+        prc_comp_denom = (1-k)*f+k # A recurring term in the polynomial
+        # 1st term, 1st part from product rule
+        gd = (1-k0)*np.prod(prc_comp_denom)
+        # 1st term, 2nd part from product rule
+        for i,ki in enumerate(k):
+            gd += f*(1-k0)*(1-ki)*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:])
+        # 2nd term, 1st part from product rule
+        for i, x_i in enumerate(nom_comp):
+            gd -= (1-k0)*x_i*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:])
+        # 2nd term, 2nd part from prodcut rule
+        for i, x_i in enumerate(nom_comp):
+            for l,kl in enumerate(k):
+                if l!=i:
+                    if l<i:
+                        gd -= (f*(1-k0)+k0)*x_i*(1-kl)*np.prod(prc_comp_denom[:l])*np.prod(prc_comp_denom[l+1:i])*np.prod(prc_comp_denom[i+1:])
+                    elif i<l:
+                        gd -= (f*(1-k0)+k0)*x_i*(1-kl)*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:l])*np.prod(prc_comp_denom[l+1:])
+        # 3rd term
+        for i,ki in enumerate(k):
+            gd -= (1-np.sum(nom_comp)-k0)*(1-ki)*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:])
+        return gd
+    return np.vectorize(gd)
+
+def skip_prod(array,indices):
+    # indices should be list.
+    # Calculates product of array excl. indices supplied.
+    indices.sort()
+    prod = np.prod(array[:indices[0]])
+    if len(indices)>1:
+        for pos,index in enumerate(indices[:-1]):
+            next_ind = indices[pos+1]
+            prod *= np.prod(array[index+1:next_ind])
+    prod *= np.prod(array[indices[-1]+1:])
+    return prod
+
+# 2nd Derivative of the polynomial
+def polydd_f(part_coeffs,nom_comp):
+    k0 = part_coeffs[0]
+    k = part_coeffs[1:]
+    # The polynomial's 2nd derivative, term-by-term
+    def gdd(f):
+        prc_comp_denom = (1-k)*f+k # A recurring term in the polynomial
+        gdd = 0
+        # 1st term, 1st 2 parts from product rule
+        for i, ki in enumerate(k):
+            gdd += 2*(1-k0)*(1-ki)*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:])
+        # 1st term 3rd part from product rule
+        for i, ki in enumerate(k):
+            for l,kl in enumerate(k):
+                if l!=i:
+                    if l<i:
+                        gdd += f*(1-k0)*(1-ki)*(1-kl)*np.prod(prc_comp_denom[:l])*np.prod(prc_comp_denom[l+1:i])*np.prod(prc_comp_denom[i+1:])
+                    elif i<l:
+                        gdd += f*(1-k0)*(1-ki)*(1-kl)*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:l])*np.prod(prc_comp_denom[l+1:])
+        # 2nd term, 1st 2 parts from product rule
+        for i, x_i in enumerate(nom_comp):
+            for l,kl in enumerate(k):
+                if l!=i:
+                    if l<i:
+                        gdd -= 2*(1-k0)*x_i*(1-kl)*np.prod(prc_comp_denom[:l])*np.prod(prc_comp_denom[l+1:i])*np.prod(prc_comp_denom[i+1:])
+                    elif i<l:
+                        gdd -= 2*(1-k0)*x_i*(1-kl)*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:l])*np.prod(prc_comp_denom[l+1:])
+        # 2nd term, 3rd part from prodcut rule
+        for i,x_i in enumerate(nom_comp):
+            for l,kl in enumerate(k):
+                if l!=i:
+                    for m,km in enumerate(k):
+                        if m!=i and m!=l:
+                            gdd -= (f*(1-k0)+k0)*x_i*(1-kl)*(1-km)*skip_prod(prc_comp_denom, [i,l,m])
+        # 3rd term
+        for i, k_i in enumerate(k):
+            for l,kl in enumerate(k):
+                if l!=i:
+                    if l<i:
+                        gdd -= (1-np.sum(nom_comp)-k0)*(1-k_i)*(1-kl)*np.prod(prc_comp_denom[:l])*np.prod(prc_comp_denom[l+1:i])*np.prod(prc_comp_denom[i+1:])
+                    elif i<l:
+                        gdd -= (1-np.sum(nom_comp)-k0)*(1-k_i)*(1-kl)*np.prod(prc_comp_denom[:i])*np.prod(prc_comp_denom[i+1:l])*np.prod(prc_comp_denom[l+1:])
+        return gdd
+    return np.vectorize(gdd)
+
+def newtonRaphson(g,g_deriv,f0,f_tol):
+    df = np.inf
+    f = f0
+    while abs(df) > f_tol:
+        df = g(f)/g_deriv(f)
+        f -= df
+    return f
+
+def halley(g,g_deriv,g_deriv2,f0,f_tol,N_iter=100):
+    df = np.inf
+    f = f0
+    for n in range(N_iter):
+        df = 2*g(f)*g_deriv(f)/(2*g_deriv(f)**2-g(f)*g_deriv2(f))
+        f -= df
+        if abs(df) < f_tol: break
+    return f
+
+def newtonRaphson_bounded(g,g_deriv,f0,f_tol,alpha=1.0,x0=0.5):
+    # estimate the tolerance in the function g
+    g_tol = f_tol*(np.array([g_deriv(f_) for f_ in np.linspace(0,1,25)]).max())
+    # mapping function
+    sigma = lambda x: (1+np.exp(-alpha*(x-x0)))**-1
+    f = f0
+    x = x0 - np.log(-1+f0**-1)/alpha
+    g_err = g(sigma(x))
+    while abs(g_err) > g_tol:
+        g_err = g(sigma(x))
+        dx = -4*alpha*(np.cosh(alpha*x/2))**2*g_err/g_deriv(sigma(x))
+        x -= dx
+    f = sigma(x)
+    return f
+
+def root_finder(g,g_deriv,g_deriv2,f_tol,f_scale,N_iter=100):
+    # Coarse method to find 1st turning point before f=1.0
+    f = 1.0
+    while f>0.0:
+        gd_0 = g_deriv(f)
+        f -= f_scale
+        gd_1 = g_deriv(f)
+        if gd_0*gd_1 <= 0: # check for sign change
+            break
+    f_sol = halley(g,g_deriv,g_deriv2,f,f_tol,N_iter=N_iter)
+    return f_sol
 
 if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
