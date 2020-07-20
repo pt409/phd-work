@@ -237,18 +237,23 @@ for el in elements:
     if not part_coeff_header in ms_df:
         part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ") # In case there's a space after the element name in the database.
     ml_data_dict[el] = get_Xy(ms_df,part_coeff_header,min_max=[0.0,100.0],ht=incl_ht)
-ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
-output_head = "        \t"+"       \t".join(elements + ["f"])
+#ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
+f_data = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
+# output_head = "        \t"+"       \t".join(elements + ["f"]) # Holdover from when krr model was used for f
+output_head = "        \t"+"       \t".join(elements)
 
 # Target data
-X_ms = ml_data_dict["f"][0]
+#X_ms = ml_data_dict["f"][0]
+X_ms = f_data[0]
 x_comp = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
 x_prc_target = (ms_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
-f = ml_data_dict["f"][1].reshape(-1,1)
+#f = ml_data_dict["f"][1].reshape(-1,1)
+f = f_data[1].reshape(-1,1)
 N = x_comp.shape[0]
 # can also calculate an error if mean compositions were used here.
 mu = 3. # Weighting of overall precipitate fraction in the score.
-error_0 = (0.5*mu*(f-f.mean())**2 + (1.e-4*(f.mean()*x_prc_target.mean(axis=0)-f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
+#error_0 = (0.5*mu*(f-f.mean())**2 + (1.e-4*(f.mean()*x_prc_target.mean(axis=0)-f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
+error_0 = 1.e-4*0.5*((f - f.mean())**2).mean(axis=0)
 
 # Kernel ridge model for each microstructural property.
 next_alpha = {ms_prop:0.1 for ms_prop in ml_data_dict.keys()}
@@ -314,13 +319,19 @@ def calc_microstruc_error(sij,v=1):
         print(cv_output)
         print(lambda_output)
     # Calculate the predicted phase composition. 
-    x_prc, f_pred = predict_phase(models,x_comp,X_ms)
-    frac_error = (0.5*(f - f_pred)**2).mean(axis=0)
-    phase_error = ((1.e-4*(f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
-    error = mu*frac_error + phase_error
+    #x_prc, f_pred = predict_phase(models,x_comp,X_ms)
+    #frac_error = (0.5*(f - f_pred)**2).mean(axis=0)
+    #phase_error = ((1.e-4*(f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
+    #error = mu*frac_error + phase_error
+    # New error calculation based on the predicted precipitate fraction
+    k_pred = predict_part_coeffs(models,X_ms)
+    #f_pred = np.array([root_finder(poly_f(k,x),polyd_f(k,x),polydd_f(k,x),0.005,0.1) for k,x in zip(k_pred,x_comp)]).reshape(-1,1)
+    f_pred = np.array([calc_prc_frac(x,k,0.005) for k,x in zip(k_pred,x_comp)]).reshape(-1,1)
+    error = 0.5*((0.01*f - f_pred)**2).mean(axis=0)
     if v >= 1:
         score = 1.0 - error/error_0
-        print("\nFraction error = {:.6f} Phase error = {:.6f} Microstructural error = {:.6f}\nscore = {:.5f}\n".format(frac_error[0],phase_error[0],error[0],score[0]))
+        #print("\nFraction error = {:.6f} Phase error = {:.6f} Microstructural error = {:.6f}\nscore = {:.5f}\n".format(frac_error[0],phase_error[0],error[0],score[0]))
+        print("\nMicrostructural error = {:.6f}\nscore = {:.5f}\n".format(error[0],score[0]))
     # Store models if the error is lowest yet.
     global best_error
     global opt_models
@@ -476,6 +487,14 @@ def root_finder(g,g_deriv,g_deriv2,f_tol,f_scale,N_iter=100):
             break
     f_sol = halley(g,g_deriv,g_deriv2,f,f_tol,N_iter=N_iter)
     return f_sol
+
+def calc_prc_frac(x_comp,part_coeffs,f_tol,f_scale=0.1,trace_tol=0.1,N_iter=100):
+    trace_els = np.where(x_comp<=trace_tol)[0]
+    x = np.delete(x_comp,trace_els)
+    k = np.delete(part_coeffs,trace_els+1)    
+    g = poly_f(k,x) ; gd = polyd_f(k,x) ; gdd = polydd_f(k,x)
+    f = root_finder(g,gd,gdd,f_tol,f_scale)
+    return f
 
 if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
