@@ -11,11 +11,13 @@ import pandas as pd
 from mendeleev import element
 import sys
 
+#input_database = "../big_alloy_database.ods"
 input_database = sys.argv[1]
 output_database = sys.argv[2]
 if "creep" in sys.argv[2:]:
     do_creep_processing = True
 else: do_creep_processing = False
+#do_creep_processing = False
 
 df = pd.read_excel(input_database,engine="odf",header=[0,1,2])
 els = df["Composition","wt. %"].columns.values
@@ -65,6 +67,18 @@ def calc_prc_frac(nom,mtx,prc,error=0.01):
         prc = np.delete(prc,zero_vals)
     return 100*np.average((nom-mtx)/(prc-mtx),weights=nom)
 
+def calc_part_coeff(mtx,prc,x_tol):
+    K = np.full_like(mtx,np.nan)
+    for i,(x_mtx,x_prc) in enumerate(zip(mtx,prc)):
+        if abs(x_mtx) < x_tol and abs(x_prc) < x_tol:
+            continue
+        elif abs(x_mtx) < x_tol and abs(x_prc) >= x_tol:
+            x_mtx += x_tol
+        elif abs(x_mtx) >= x_tol and abs(x_prc) < x_tol:
+            x_prc += x_tol
+        K[i] = x_mtx/x_prc
+    return K          
+        
 def read_in_part_coeff(input_):
     return np.array([np.nan if i == "-" else i for i in input_]).astype(np.float64)
 
@@ -75,7 +89,7 @@ def replace_if_new_value(input_old,input_new):
     return np.array([old if np.isfinite(old) else new for old,new in zip(input_old,input_new)])
 
 # Process compositions (nominal, matrix, and precipitate as well as precipitate fractions.)
-def process_composition(index,row,return_codes=False,inf_value=1e3,correct_if_neg=False):
+def process_composition(index,row,return_codes=False,inf_value=1e3,x_tol=0.01,correct_if_neg=False):
     # Convert any wt. % compositions to at. % and vice versa
     nom_wt_comp = row[("Composition","wt. %")].values
     nom_at_comp = row[("Composition","at. %")].values
@@ -151,8 +165,8 @@ def process_composition(index,row,return_codes=False,inf_value=1e3,correct_if_ne
                 at_frac = calc_prc_frac(nom_at_comp,mtx_at_comp,prc_at_comp)
                 at_frac_rtn_code = 2
             # In this case the partitioning coefficients can be calculated too.
-            K_part_wt = replace_if_new_value(K_part_wt,inf_2_large(np.divide(mtx_wt_comp,prc_wt_comp),inf_value))
-            K_part_at = replace_if_new_value(K_part_at,inf_2_large(np.divide(mtx_at_comp,prc_at_comp),inf_value))
+            K_part_wt = replace_if_new_value(K_part_wt,calc_part_coeff(mtx_wt_comp,prc_wt_comp,x_tol))
+            K_part_at = replace_if_new_value(K_part_at,calc_part_coeff(mtx_at_comp,prc_at_comp,x_tol))
     if not return_codes:
         return nom_wt_comp,nom_at_comp,mtx_wt_comp,mtx_at_comp,prc_wt_comp,prc_at_comp,wt_frac,at_frac,K_part_wt,K_part_at
     else:
