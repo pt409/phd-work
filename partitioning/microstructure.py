@@ -20,11 +20,12 @@ from scipy.optimize import minimize
 from copy import deepcopy,copy
 
 # Some options.
-incl_ht = True
+incl_ht = False
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
+learn_log_Ki = True # Whether to machine learn the logarithm of the partitioning coefficients or not.
 
 # Read in a processed dataset.
-df = pd.read_csv("../datasets/processing/processed_alloy_database_v3.csv",header=[0,1,2])
+df = pd.read_csv("../datasets/processing/processed_alloy_database_v4.csv",header=[0,1,2])
 df.set_index("Name")
 
 def check_if_valid(input_,allow_all_null=False):
@@ -62,7 +63,7 @@ def get_microstructure_data(df,drop_duplicate_comps=False):
 
 # Use in conjunction with get_microstructure to get the X,y data for machine learning purposes.
 def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
-           min_max=None,drop_na=True,flatten=False,ht=False):
+           min_max=None,drop_na=True,flatten=False,ht=False,log_y=False):
     # Enter header as tuple in case of multiindex
     # drop empty rows
     if drop_na:
@@ -76,7 +77,9 @@ def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
     y = sub_df[y_header].astype(np.float64).values
     if flatten and len(y.shape) > 1 and y.shape[-1] == 1:
         y = y.flatten()
-    X1 = (sub_df.loc[:,("Composition","at. %")]).drop(drop_els,axis=1).astype(np.float64).values
+    if log_y:
+        y = np.log(y)
+    X1 = 0.01*(sub_df.loc[:,("Composition","at. %")]).drop(drop_els,axis=1).astype(np.float64).values
     if ht:
         X0 = sub_df.loc[:,("Precipitation heat treatment")]
         col_order = sorted(X0.columns.tolist(),key = lambda h: h[1])
@@ -179,7 +182,9 @@ class cohort_model:
         return r2_score(y,self.predict(X))
     
 # Predict composition of precipitate phase from partitioning coefficients
-def predict_phase(models,x_comp,X,elements=["Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]):
+def predict_phase(models,x_comp,X,
+                  elements=["Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"],
+                  log_models=False):
     # X is the feature vector (composition or composition & heat treatments)
     # x_comp is the composition of the overall alloy
     N = x_comp.shape[0]
@@ -187,15 +192,21 @@ def predict_phase(models,x_comp,X,elements=["Cr","Co","Re","Ru","Al","Ta","W","T
     f_pred = models["f"].predict(X).reshape(-1,1)
     for el in elements:
         K = np.c_[K,(models[el].predict(X))]
-    x_prc = x_comp/((1 - 0.01*f_pred)*K + 0.01*f_pred)
-    x_prc = np.c_[100.0-x_prc.sum(axis=1),x_prc] # Add on bal element composition
+    if log_models:
+        K = np.exp(K)
+    x_prc = x_comp/((1 - f_pred)*K + f_pred)
+    x_prc = np.c_[1.0-x_prc.sum(axis=1),x_prc] # Add on bal element composition
     return x_prc, f_pred
 
-def predict_part_coeffs(models,X,elements=["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]):
+def predict_part_coeffs(models,X,
+                        elements=["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"],
+                        log_models=False):
     N = x_comp.shape[0]
     K = np.empty((N,0))
     for el in elements:
         K = np.c_[K,(models[el].predict(X))]
+    if log_models:
+        K = np.exp(K)
     return K
 
 # Process database in order to get all the microstructural data.
@@ -207,6 +218,9 @@ if incl_ht:
 else:
     my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
 
+# inner-most function of the main procedure, trains a krr model for a given property...
+# ... for an entire cohort so that this can be used in a minimization function to optimise...
+# ... cross-validation score.
 def train_cohort_model(alpha_j,X,y,return_model=False):
     loo = LeaveOneOut()
     n = loo.get_n_splits(X)
@@ -236,7 +250,7 @@ for el in elements:
     part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el)
     if not part_coeff_header in ms_df:
         part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ") # In case there's a space after the element name in the database.
-    ml_data_dict[el] = get_Xy(ms_df,part_coeff_header,min_max=[0.0,100.0],ht=incl_ht)
+    ml_data_dict[el] = get_Xy(ms_df,part_coeff_header,min_max=[0.0,100.0],ht=incl_ht,log_y=learn_log_Ki)
 #ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
 f_data = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
 # output_head = "        \t"+"       \t".join(elements + ["f"]) # Holdover from when krr model was used for f
@@ -245,22 +259,25 @@ output_head = "        \t"+"       \t".join(elements)
 # Target data
 #X_ms = ml_data_dict["f"][0]
 X_ms = f_data[0]
-x_comp = (ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
-x_prc_target = (ms_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
+x_comp = 0.01*(ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
+x_comp_full = np.c_[1.0-x_comp.sum(axis=1),x_comp]
+x_prc_target = 0.01*(ms_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
 #f = ml_data_dict["f"][1].reshape(-1,1)
-f = f_data[1].reshape(-1,1)
+f = 0.01*f_data[1].reshape(-1,1)
 N = x_comp.shape[0]
 # can also calculate an error if mean compositions were used here.
-mu = 3. # Weighting of overall precipitate fraction in the score.
+mu = 5.0 # Weighting of overall precipitate fraction in the score.
 #error_0 = (0.5*mu*(f-f.mean())**2 + (1.e-4*(f.mean()*x_prc_target.mean(axis=0)-f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
-error_0 = 1.e-4*0.5*((f - f.mean())**2).mean(axis=0)
+frac_error_0 = 0.5*((f - f.mean())**2).mean(axis=0)
+phase_error_0 = (((x_prc_target - x_prc_target.mean(axis=0))**2).sum(axis=1,keepdims=True)).mean(axis=0)
+error_0 = mu*frac_error_0 + phase_error_0
 
 # Kernel ridge model for each microstructural property.
 next_alpha = {ms_prop:0.1 for ms_prop in ml_data_dict.keys()}
 models = {}
 opt_models = {}
 best_error = np.inf
-# Define as a function for use with minimiser:
+# Define as a function for use with minimiser. This is used to optimise the kernel.
 def calc_microstruc_error(sij,v=1):
     # v is the verbosity, 0, 1 or 2 (most verbose).
     # First update the kernel with new parameters:
@@ -298,7 +315,7 @@ def calc_microstruc_error(sij,v=1):
                           args=ms_data,
                           method="L-BFGS-B",
                           bounds=[(1.e-8,None)],
-                          options={"ftol":1.e-2,
+                          options={"ftol":2.e-3,
                                    "gtol":1.e-3,
                                    "eps":1.e-4})
         opt_alpha = result.x
@@ -319,19 +336,29 @@ def calc_microstruc_error(sij,v=1):
         print(cv_output)
         print(lambda_output)
     # Calculate the predicted phase composition. 
-    #x_prc, f_pred = predict_phase(models,x_comp,X_ms)
+    #x_prc, f_pred = predict_phase(models,x_comp,X_ms,log_models=learn_log_Ki)
     #frac_error = (0.5*(f - f_pred)**2).mean(axis=0)
     #phase_error = ((1.e-4*(f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
     #error = mu*frac_error + phase_error
     # New error calculation based on the predicted precipitate fraction
-    k_pred = predict_part_coeffs(models,X_ms)
+    k_pred = predict_part_coeffs(models,X_ms,log_models=learn_log_Ki)
     #f_pred = np.array([root_finder(poly_f(k,x),polyd_f(k,x),polydd_f(k,x),0.005,0.1) for k,x in zip(k_pred,x_comp)]).reshape(-1,1)
     f_pred = np.array([calc_prc_frac(x,k,0.005) for k,x in zip(k_pred,x_comp)]).reshape(-1,1)
-    error = 0.5*((0.01*f - f_pred)**2).mean(axis=0)
+    x_prc = x_comp_full/((1.0 - f_pred)*k_pred + f_pred)
+    frac_error = 0.5*((f - f_pred)**2).mean(axis=0)
+    # old version:
+    #phase_error = (((f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
+    # new version:
+    phase_error = (((x_prc - x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)    
+    error = mu*frac_error + phase_error
     if v >= 1:
+        frac_score = 1.0 - frac_error/frac_error_0
+        phase_score = 1.0 - phase_error/phase_error_0
         score = 1.0 - error/error_0
-        #print("\nFraction error = {:.6f} Phase error = {:.6f} Microstructural error = {:.6f}\nscore = {:.5f}\n".format(frac_error[0],phase_error[0],error[0],score[0]))
-        print("\nMicrostructural error = {:.6f}\nscore = {:.5f}\n".format(error[0],score[0]))
+        print("\nFraction error = {:.6f}   |   score = {:.5f}\n".format(frac_error[0],frac_score[0]))
+        print("\nPhase error    = {:.6f}   |   score = {:.5f}\n".format(phase_error[0],phase_score[0]))
+        print("\nOverall error  = {:.6f}   |   score = {:.5f}\n".format(error[0],score[0]))
+        #print("\nMicrostructural error = {:.6f}\nscore = {:.5f}\n".format(error[0],score[0]))
     # Store models if the error is lowest yet.
     global best_error
     global opt_models
@@ -340,6 +367,8 @@ def calc_microstruc_error(sij,v=1):
         best_error = copy(error)
     # Finally return error
     return error
+
+######################### NUMERICAL POLYNOMIAL SOLVERS #######################
 
 # Solve polynomial in f to get the precipitate fraction
 def poly_f(part_coeffs,nom_comp):
@@ -444,6 +473,8 @@ def polydd_f(part_coeffs,nom_comp):
         return gdd
     return np.vectorize(gdd)
 
+# Solvers themselves, only halley used, rest are legacy.
+
 def newtonRaphson(g,g_deriv,f0,f_tol):
     df = np.inf
     f = f0
@@ -476,6 +507,8 @@ def newtonRaphson_bounded(g,g_deriv,f0,f_tol,alpha=1.0,x0=0.5):
     f = sigma(x)
     return f
 
+# More useful wrappers for solvers.
+
 def root_finder(g,g_deriv,g_deriv2,f_tol,f_scale,N_iter=100):
     # Coarse method to find 1st turning point before f=1.0
     f = 1.0
@@ -488,13 +521,15 @@ def root_finder(g,g_deriv,g_deriv2,f_tol,f_scale,N_iter=100):
     f_sol = halley(g,g_deriv,g_deriv2,f,f_tol,N_iter=N_iter)
     return f_sol
 
-def calc_prc_frac(x_comp,part_coeffs,f_tol,f_scale=0.1,trace_tol=0.1,N_iter=100):
-    trace_els = np.where(x_comp<=trace_tol)[0]
+def calc_prc_frac(x_comp,part_coeffs,f_tol,f_scale=0.1,trace_tol=0.001,N_iter=100):
+    trace_els = np.where(x_comp<trace_tol)[0]
     x = np.delete(x_comp,trace_els)
     k = np.delete(part_coeffs,trace_els+1)    
     g = poly_f(k,x) ; gd = polyd_f(k,x) ; gdd = polydd_f(k,x)
     f = root_finder(g,gd,gdd,f_tol,f_scale)
     return f
+
+##############################################################################
 
 if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
@@ -513,12 +548,13 @@ if __name__ == '__main__':
             sij_init[-1] = 0.1 # Represents the gamma parameter.
         else:
             sij_init = 0.1*np.ones(1)
-    eps = 1.e-3*sij_init
+    eps = 1.e-4*sij_init
+    bounds = sij_init.shape[0]*[(0.,None)]
     result = minimize(calc_microstruc_error,
                       sij_init,
                       args=(v,),
                       method="L-BFGS-B",
-                      bounds=[(0.,None),(0.,None)],
+                      bounds=bounds,
                       options={"ftol":2.e-3,
                                "gtol":1.e-3,
                                "eps":eps})
