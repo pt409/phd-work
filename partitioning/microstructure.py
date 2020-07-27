@@ -20,7 +20,7 @@ from scipy.optimize import minimize
 from copy import deepcopy,copy
 
 # Some options.
-incl_ht = False
+incl_ht = True
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 learn_log_Ki = True # Whether to machine learn the logarithm of the partitioning coefficients or not.
 
@@ -298,10 +298,11 @@ def calc_microstruc_error(sij,v=1):
             sij = np.ones(9)
     my_kernel.update_params(sij,*gamma)    
     if v >= 1:
+        print("Kernel parameters for this iteration:")
         if squash_dof:
             print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
         print("gamma =\t"+("\t".join("{:.6e}".format(_) for _ in gamma)))
-        print("Beginning to fit kernel ridge models for microstructural properties.")
+        print("\nBeginning to fit kernel ridge models for partitioning coefficients.")
     # Loop through each microstructural property and train optimal krr model using cv.
     # Store some values calculated for output purposes.
     lambda_output = "lambda =\t"
@@ -309,7 +310,7 @@ def calc_microstruc_error(sij,v=1):
     cv_output =  "CV err =\t"
     for ms_prop, ms_data in ml_data_dict.items():
         
-        if v>=1: print("Microstructural property {} ...".format(ms_prop))
+        if v>=2: print("{} part. coeff. ...".format(ms_prop))
         result = minimize(train_cohort_model,
                           next_alpha[ms_prop],
                           args=ms_data,
@@ -351,13 +352,12 @@ def calc_microstruc_error(sij,v=1):
     # new version:
     phase_error = (((x_prc - x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)    
     error = mu*frac_error + phase_error
-    if v >= 1:
+    score = 1.0 - error/error_0
+    if v >= 2:
         frac_score = 1.0 - frac_error/frac_error_0
         phase_score = 1.0 - phase_error/phase_error_0
-        score = 1.0 - error/error_0
-        print("\nFraction error = {:.6f}   |   score = {:.5f}\n".format(frac_error[0],frac_score[0]))
-        print("\nPhase error    = {:.6f}   |   score = {:.5f}\n".format(phase_error[0],phase_score[0]))
-        print("\nOverall error  = {:.6f}   |   score = {:.5f}\n".format(error[0],score[0]))
+        print("\nFraction error = {:.6f}   |   score = {:.5f}".format(frac_error[0],frac_score[0]))
+        print("Phase error    = {:.6f}   |   score = {:.5f}".format(phase_error[0],phase_score[0]))
         #print("\nMicrostructural error = {:.6f}\nscore = {:.5f}\n".format(error[0],score[0]))
     # Store models if the error is lowest yet.
     global best_error
@@ -365,6 +365,12 @@ def calc_microstruc_error(sij,v=1):
     if error < best_error:
         opt_models = deepcopy(models)
         best_error = copy(error)
+        if v >= 1:
+            print("Overall error  = {:.6f}   |   score = {:.5f}  <----NEW BEST".format(error[0],score[0]))
+            print("".join(130*["-"])+"\n")
+    elif v >= 1:
+        print("Overall error  = {:.6f}   |   score = {:.5f}".format(error[0],score[0]))
+        print("".join(130*["-"])+"\n")
     # Finally return error
     return error
 
