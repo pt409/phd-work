@@ -98,13 +98,13 @@ class Lammps :
                       "elastic_run":"/elastic_scripts/elastic_2.in",
                       "elastic_deform":"/elastic_scripts/elastic_3.in"}
         try:
-            desired_file = sys.path[0]+"/lammps_scripts"+script_lib[script] if sys.path[0] != "" else "lammps_scripts"+script_lib[script]
+            desired_file = sys.path[2]+"/lammps_scripts"+script_lib[script] if sys.path[2] != "" else "lammps_scripts"+script_lib[script]
             new_input_file = loc + "/" + script_lib[script].split("/")[-1] if loc != "." else script_lib[script].split("/")[-1]
             sp.call(["mkdir","-p",loc])
             prefix = (loc.count("/")+1*(loc!="."))*"../" # Prefix for potentials location
             with open(desired_file,'r') as default_file:
                 default_content = default_file.read()
-                updated_content = default_content.replace(pot,sys.path[0]+"/potentials/"+pot) if sys.path[0] != "" else default_content.replace(pot,prefix+"potentials/"+pot)
+                updated_content = default_content.replace(pot,sys.path[2]+"/potentials/"+pot) if sys.path[2] != "" else default_content.replace(pot,prefix+"potentials/"+pot)
             with open(new_input_file,"w+") as write_file:
                 write_file.write(updated_content)
             new_object = cls.setup(new_input_file)
