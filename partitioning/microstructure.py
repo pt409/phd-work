@@ -201,7 +201,7 @@ def predict_phase(models,x_comp,X,
 def predict_part_coeffs(models,X,
                         elements=["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"],
                         log_models=False):
-    N = x_comp.shape[0]
+    N = X.shape[0]
     K = np.empty((N,0))
     for el in elements:
         K = np.c_[K,(models[el].predict(X))]
