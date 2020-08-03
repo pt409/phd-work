@@ -53,7 +53,7 @@ with open(sfe_min.log_loc()) as read_file:
     f = read_file.readlines()
     x_tot = float(f[-17].split()[-2])
 a = x_tot*2/np.sqrt(6) # Lattice parameter
-dx = -x_tot/2/(steps-1)
+dx = -x_tot/(steps-1)
 # Step refers to shift in upper part of supercell to calculate intrinsic stacking fault
 sfe_step = Lammps.default_setup("sfe_step",loc=base_dir)
 sfe_step.update(update_dict={"variable x_displace":"equal 0.0","read_data":"alloyified_elemental.data","variable latparam1 equal":str(a)},replace_dict={"Ni Ni":alloy_elements,"Ni Al Ni Al":alloy_elements})
@@ -75,15 +75,18 @@ for step in range(steps):
         
 E = np.array(E)
 E -= E[0]
+displacement = -np.array(displacement)
 
 # Find extrema, and their nature
 #first = [(E[(i+1)%steps]-E[i-1])/(2*dx) for i,_ in enumerate(E)]
 #second = [(E[i-1]-2*E[i]+E[(i+1)%steps])/dx**2 for i,_ in enumerate(E)]
         
 # put a line through sf, usf, utf
-plt.plot([-1/2/np.sqrt(6),-1/2/np.sqrt(6)],[0,E.max()],'--k')
-plt.plot([-1/np.sqrt(6),-1/np.sqrt(6)],[0,E.max()],'--k')
-plt.plot([-3*1/2/np.sqrt(6),-3*1/2/np.sqrt(6)],[0,E.max()],'--k')
+plt.plot([1/2/np.sqrt(6),1/2/np.sqrt(6)],[0,E.max()],'--k')
+plt.plot([1/np.sqrt(6),1/np.sqrt(6)],[0,E.max()],'--k')
+plt.plot([3*1/2/np.sqrt(6),3*1/2/np.sqrt(6)],[0,E.max()],'--k')
+plt.plot([2/np.sqrt(6),2/np.sqrt(6)],[0,E.max()],'--k')
+plt.plot([5*1/2/np.sqrt(6),5*1/2/np.sqrt(6)],[0,E.max()],'--k')
 # plot actual SFE now
 plt.plot(displacement,E,'c')
 plt.xlabel("Displacement/lattice parameter")
