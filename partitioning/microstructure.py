@@ -20,9 +20,10 @@ from scipy.optimize import minimize
 from copy import deepcopy,copy
 
 # Some options.
-incl_ht = True
+incl_ht = False
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 learn_log_Ki = True # Whether to machine learn the logarithm of the partitioning coefficients or not.
+comp_kernel_type = "rbf" # "rbf" = standard Gaussian RBF kernel, "special" = modified RBF kernel.
 
 ############################### DATA PROCESSING ###############################
 
@@ -92,8 +93,10 @@ def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
         X = X1
     return X,y
 
+################################## KERNELS ####################################
+
 # Class to define the unique kernel used.
-class special_kernel :
+class rbf_kernel :
     def __init__(self,si,gamma,dim):
         self.tdim = dim+1
         self.S = np.diag(np.append(si,1))
@@ -110,7 +113,8 @@ class special_kernel :
     
     # Calculate kernelised inner product.
     def kernel(self,x,y):
-        return np.exp(-self.gamma*np.linalg.norm(self.M@(x-y),1))
+        v = self.M@(x-y)
+        return np.exp(-self.gamma*np.inner(v,v))
     
     # Update kernel parameters.
     def update_params(self,si,gamma):
@@ -124,6 +128,14 @@ class special_kernel :
         new_instance = cls(si,gamma,dim)
         new_instance.construct_trans()
         return new_instance
+
+class special_kernel(rbf_kernel) :
+    def __init__(self,si,gamma,dim):
+        super(special_kernel,self).__init__(si,gamma,dim)
+    
+    # Calculate kernelised inner product.
+    def kernel(self,x,y):
+        return np.exp(-self.gamma*np.linalg.norm(self.M@(x-y),1))
 
 # A special kernel to deal with having composition AND heat treatment.
 class multi_kernel(special_kernel):
@@ -157,6 +169,8 @@ class multi_kernel(special_kernel):
         new_instance = cls(si,gamma,mu,comp_dim,ht_dim)
         new_instance.construct_trans()
         return new_instance
+    
+############################### MAIN SUBROUTINES ##############################
     
 # Wrapper for sklearn predictor when there are n models in a cohort and prediction is the mean one.
 class cohort_model:
@@ -218,7 +232,11 @@ ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht))
 if incl_ht:
     my_kernel = multi_kernel.setup(np.ones(9),0.1,0.1,3)
 else:
-    my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
+    # Have 2 different options for kernels.
+    if comp_kernel_type == "special":
+        my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
+    else: 
+        my_kernel = rbf_kernel.setup(np.ones(9),0.1)
 
 # inner-most function of the main procedure, trains a krr model for a given property...
 # ... for an entire cohort so that this can be used in a minimization function to optimise...
@@ -570,14 +588,14 @@ if __name__ == '__main__':
             sij_init[-1] = 0.1 # Represents the gamma parameter.
         else:
             sij_init = 0.1*np.ones(1)
-    eps = 1.e-4*sij_init
+    eps = 5.e-4*sij_init
     bounds = sij_init.shape[0]*[(0.,None)]
     result = minimize(calc_microstruc_error,
                       sij_init,
                       args=(v,),
                       method="L-BFGS-B",
                       bounds=bounds,
-                      options={"ftol":1.e-2,
+                      options={"ftol":5.e-3,
                                "gtol":5.e-3,
                                "eps":eps})
     # Pickle the optimised models that were found.
