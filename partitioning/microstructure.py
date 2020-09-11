@@ -24,6 +24,8 @@ incl_ht = True
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 learn_log_Ki = True # Whether to machine learn the logarithm of the partitioning coefficients or not.
 
+############################### DATA PROCESSING ###############################
+
 # Read in a processed dataset.
 df = pd.read_csv("../datasets/processing/processed_alloy_database_v4.csv",header=[0,1,2])
 df.set_index("Name")
@@ -266,10 +268,10 @@ x_prc_target = 0.01*(ms_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"
 f = 0.01*f_data[1].reshape(-1,1)
 N = x_comp.shape[0]
 # can also calculate an error if mean compositions were used here.
-mu = 5.0 # Weighting of overall precipitate fraction in the score.
+mu = 2.0 # Weighting of overall precipitate fraction in the score.
 #error_0 = (0.5*mu*(f-f.mean())**2 + (1.e-4*(f.mean()*x_prc_target.mean(axis=0)-f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
 frac_error_0 = 0.5*((f - f.mean())**2).mean(axis=0)
-phase_error_0 = (((x_prc_target - x_prc_target.mean(axis=0))**2).sum(axis=1,keepdims=True)).mean(axis=0)
+phase_error_0 = (((f*x_prc_target - f.mean()*x_prc_target.mean(axis=0))**2).sum(axis=1,keepdims=True)).mean(axis=0)
 error_0 = mu*frac_error_0 + phase_error_0
 
 # Kernel ridge model for each microstructural property.
@@ -316,9 +318,9 @@ def calc_microstruc_error(sij,v=1):
                           args=ms_data,
                           method="L-BFGS-B",
                           bounds=[(1.e-8,None)],
-                          options={"ftol":2.e-3,
-                                   "gtol":1.e-3,
-                                   "eps":1.e-4})
+                          options={"ftol":5.e-3,
+                                   "gtol":3.e-3,
+                                   "eps":5.e-4})
         opt_alpha = result.x
         next_alpha[ms_prop] = opt_alpha
         krr_model = train_cohort_model(opt_alpha,*ms_data,return_model=True)
@@ -350,7 +352,7 @@ def calc_microstruc_error(sij,v=1):
     # old version:
     #phase_error = (((f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
     # new version:
-    phase_error = (((x_prc - x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)    
+    phase_error = (((f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)    
     error = mu*frac_error + phase_error
     score = 1.0 - error/error_0
     if v >= 2:
@@ -422,6 +424,7 @@ def polyd_f(part_coeffs,nom_comp):
         return gd
     return np.vectorize(gd)
 
+# Calculate $\prod_{i,i\neq\{j,k,l,...\}}x_i$
 def skip_prod(array,indices):
     # indices should be list.
     # Calculates product of array excl. indices supplied.
@@ -527,12 +530,25 @@ def root_finder(g,g_deriv,g_deriv2,f_tol,f_scale,N_iter=100):
     f_sol = halley(g,g_deriv,g_deriv2,f,f_tol,N_iter=N_iter)
     return f_sol
 
-def calc_prc_frac(x_comp,part_coeffs,f_tol,f_scale=0.1,trace_tol=0.001,N_iter=100):
-    trace_els = np.where(x_comp<trace_tol)[0]
+def calc_prc_frac(x_comp,part_coeffs,f_tol,
+                  f_scale=0.1,trace_tol=0.002,N_iter=100,
+                  robust=True):
+    # Neglect elements with fraction less than trace_tol
+    # f_scale, N_iter options get passed to root_finder
+    # robust: using this option, f is also calculated from the inverse partitioning coefficients
+    #         to ensure that the correct value has been found.
+    trace_els = np.where(x_comp<=trace_tol)[0]
     x = np.delete(x_comp,trace_els)
     k = np.delete(part_coeffs,trace_els+1)    
-    g = poly_f(k,x) ; gd = polyd_f(k,x) ; gdd = polydd_f(k,x)
-    f = root_finder(g,gd,gdd,f_tol,f_scale)
+    p = poly_f(k,x) ; pd = polyd_f(k,x) ; pdd = polydd_f(k,x)
+    f = root_finder(p,pd,pdd,f_tol,f_scale)
+    if robust:
+        # Find root using inverse part. coeffs too
+        q = poly_f(k**-1,x) ; qd = polyd_f(k**-1,x) ; qdd = polydd_f(k**-1,x)
+        f_ = 1 - root_finder(q,qd,qdd,f_tol,f_scale)
+        if abs(f-f_)>2*f_tol:
+            if abs(p(f_))<abs(q(f)):
+                f = f_
     return f
 
 ##############################################################################
@@ -561,8 +577,8 @@ if __name__ == '__main__':
                       args=(v,),
                       method="L-BFGS-B",
                       bounds=bounds,
-                      options={"ftol":2.e-3,
-                               "gtol":1.e-3,
+                      options={"ftol":1.e-2,
+                               "gtol":5.e-3,
                                "eps":eps})
     # Pickle the optimised models that were found.
     with open("final_models.pkl","wb") as pickle_out:
