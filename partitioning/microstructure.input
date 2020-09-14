@@ -1,0 +1,16 @@
+[DEFAULT]
+incl_ht = true
+learn_log_Ki = true
+comp_kernel_type = special
+output_models = final_models.pkl
+database = ../datasets/processing/processed_alloy_database_v4.csv
+
+[rbf_test]
+incl_ht = false
+comp_kernel_type = rbf
+output_models = gauss_rbf_model.pkl
+
+[special_rbf_test]
+incl_ht = false
+comp_kernel_type = special
+output_models = special_rbf_model.pkl

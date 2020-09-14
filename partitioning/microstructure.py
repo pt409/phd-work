@@ -19,16 +19,29 @@ from scipy.optimize import minimize
 
 from copy import deepcopy,copy
 
+import configparser
+import sys
+
 # Some options.
-incl_ht = False
+# Uses a configparser file (.ini structure).
+config = configparser.ConfigParser()
+config.read("microstructure.input")
+if len(sys.argv) > 1: 
+    config_type = sys.argv[1]
+else: config_type = "special_rbf_test"
+incl_ht = config[config_type].getboolean("incl_ht")
+learn_log_Ki = config[config_type].getboolean("learn_log_Ki")
+comp_kernel_type = config[config_type].get("comp_kernel_type")
+opt_models_pkl = config[config_type].get("output_models")
+database = config[config_type].get("database")
+
+# This is a legacy param from previous version of code and needs to be deleted.
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
-learn_log_Ki = True # Whether to machine learn the logarithm of the partitioning coefficients or not.
-comp_kernel_type = "rbf" # "rbf" = standard Gaussian RBF kernel, "special" = modified RBF kernel.
 
 ############################### DATA PROCESSING ###############################
 
 # Read in a processed dataset.
-df = pd.read_csv("../datasets/processing/processed_alloy_database_v4.csv",header=[0,1,2])
+df = pd.read_csv(database,header=[0,1,2])
 df.set_index("Name")
 
 def check_if_valid(input_,allow_all_null=False):
@@ -599,7 +612,7 @@ if __name__ == '__main__':
                                "gtol":5.e-3,
                                "eps":eps})
     # Pickle the optimised models that were found.
-    with open("final_models.pkl","wb") as pickle_out:
+    with open(opt_models_pkl,"wb") as pickle_out:
         pickle.dump(opt_models,pickle_out)
     print("\nResult of fitting kernel parameters:\n")
     print(result)
