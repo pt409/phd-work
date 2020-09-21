@@ -32,6 +32,7 @@ else: config_type = "special_rbf_test"
 incl_ht = config[config_type].getboolean("incl_ht")
 learn_log_Ki = config[config_type].getboolean("learn_log_Ki")
 comp_kernel_type = config[config_type].get("comp_kernel_type")
+ht_kernel_type = config[config_type].get("ht_kernel_type")
 opt_models_pkl = config[config_type].get("output_models")
 database = config[config_type].get("database")
 
@@ -158,11 +159,13 @@ class multi_kernel(special_kernel):
         self.mu = mu
         self.ht_dim = ht_dim
     
+    # Gaussian rbf kernel
     def kernel(self,x,y):
-        T0,t0,x0 = self.split_vector(x)
-        T1,t1,x1 = self.split_vector(y)
-        return np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-x1),1)
-                      +self.mu*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
+        x_ht,x0 = self.split_vector(x)
+        y_ht,y0 = self.split_vector(y)
+        v = x_ht-y_ht
+        return np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-y0),1)
+                      +self.mu*np.inner(v,v)))
     
     def update_params(self,si,gamma,mu):
         self.S = np.diag(np.append(si,1))
@@ -171,10 +174,9 @@ class multi_kernel(special_kernel):
         self.construct_trans()
     
     def split_vector(self,x):
-        t = x[:self.ht_dim]
-        T = x[self.ht_dim:2*self.ht_dim]
+        x_ht = x[:2*self.ht_dim]
         x0 = x[2*self.ht_dim:]
-        return t,T,x0
+        return x_ht,x0
     
     @classmethod
     def setup(cls,si,gamma,mu,ht_dim):
@@ -182,6 +184,37 @@ class multi_kernel(special_kernel):
         new_instance = cls(si,gamma,mu,comp_dim,ht_dim)
         new_instance.construct_trans()
         return new_instance
+    
+# Variant of above with different kernel for heat treatment
+class poly_kernel(multi_kernel):
+    def __init__(self,si,gamma,mu,comp_dim,ht_dim):
+        super(poly_kernel,self).__init__(si,gamma,mu,comp_dim,ht_dim)
+    
+    # Polynomial kernel
+    def kernel(self,x,y,offset=1.0):
+        x_ht,x0 = self.split_vector(x)
+        y_ht,y0 = self.split_vector(y)
+        return (np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-y0),1)))
+                * (self.mu*np.inner(x_ht,y_ht)+offset)**2)
+        
+# Another variant (this version uses the original kernel as used in 1st year report).
+class unordered_kernel(multi_kernel):
+    def __init__(self, si, gamma, mu, comp_dim, ht_dim):
+        super(unordered_kernel,self).__init__(si,gamma,mu,comp_dim,ht_dim)
+    
+    def split_vector(self,x):
+        t = x[:self.ht_dim]
+        T = x[self.ht_dim:2*self.ht_dim]
+        x0 = x[2*self.ht_dim:]
+        return t,T,x0
+    
+    # This kernel separates the heat treatment into "length" and "temperature" parts.
+    # Kernel is also independent of order of heat treatments.
+    def kernel(self,x,y):
+        T0,t0,x0 = self.split_vector(x)
+        T1,t1,x1 = self.split_vector(y)
+        return np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-x1),1)
+                      +self.mu*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
     
 ############################### MAIN SUBROUTINES ##############################
     
@@ -243,7 +276,13 @@ ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht))
 
 # Setup initial kernel.
 if incl_ht:
-    my_kernel = multi_kernel.setup(np.ones(9),0.1,0.1,3)
+    # Have 3 different options for heat treatment kernels
+    if ht_kernel_type == "poly":
+        my_kernel = poly_kernel.setup(np.ones(9),0.1,0.1,3)
+    elif ht_kernel_type == "unordered":
+        my_kernel = unordered_kernel.setup(np.ones(9),0.1,0.1,3)
+    else:
+        my_kernel = multi_kernel.setup(np.ones(9),0.1,0.1,3)
 else:
     # Have 2 different options for kernels.
     if comp_kernel_type == "special":
@@ -586,7 +625,7 @@ def calc_prc_frac(x_comp,part_coeffs,f_tol,
 
 if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
-    v = 2 # verbosity
+    v = 2 # verbosity of output
     if incl_ht:
         if squash_dof:
             sij_init = np.ones(10)

@@ -2,6 +2,7 @@
 incl_ht = true
 learn_log_Ki = true
 comp_kernel_type = special
+ht_kernel_type = rbf
 output_models = final_models.pkl
 database = ../datasets/processing/processed_alloy_database_v4.csv
 
@@ -14,3 +15,11 @@ output_models = gauss_rbf_model.pkl
 incl_ht = false
 comp_kernel_type = special
 output_models = special_rbf_model.pkl
+
+[rbf_ht_kernel]
+ht_kernel_type = rbf
+output_models = rbf_ht_model.pkl
+
+[poly_ht_kernel]
+ht_kernel_type = poly
+output_models = poly_ht_model.pkl
