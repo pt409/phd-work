@@ -35,6 +35,10 @@ comp_kernel_type = config[config_type].get("comp_kernel_type")
 ht_kernel_type = config[config_type].get("ht_kernel_type")
 opt_models_pkl = config[config_type].get("output_models")
 database = config[config_type].get("database")
+test_frac = config[config_type].getfloat("test_pc")/100.0
+
+# Seed for test/train data splitting
+seed = None
 
 # This is a legacy param from previous version of code and needs to be deleted.
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
@@ -57,7 +61,7 @@ def check_if_valid(input_,allow_all_null=False):
 
 # Get all the entries from the database with "complete" microstructure data.
 # "Complete" means complete composiiton + precipitate fraction + phase composition data.
-def get_microstructure_data(df,drop_duplicate_comps=False):
+def get_microstructure_data(df,drop_duplicate_comps=False,shuffle_seed=None):
     ms_df = df.copy()
     drop_indices = []
     for index,row in df.iterrows():
@@ -76,6 +80,8 @@ def get_microstructure_data(df,drop_duplicate_comps=False):
     ms_df.drop(drop_indices,inplace=True)
     if drop_duplicate_comps:
         ms_df = ms_df.loc[ms_df[("Composition","at. %")].drop_duplicates().index]
+    # Shuffle database and select a specified fraction of it:
+    ms_df=ms_df.sample(frac=1.,random_state=shuffle_seed).reset_index(drop=True)
     return ms_df
 
 # Use in conjunction with get_microstructure to get the X,y data for machine learning purposes.
@@ -91,6 +97,7 @@ def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
         min_, max_ = tuple(min_max)
         if min_: sub_df = sub_df[sub_df[y_header] >= min_] # Min
         if max_: sub_df = sub_df[sub_df[y_header] <= max_] # Max
+    # Start getting data here:
     y = sub_df[y_header].astype(np.float64).values
     if flatten and len(y.shape) > 1 and y.shape[-1] == 1:
         y = y.flatten()
@@ -272,7 +279,12 @@ def predict_part_coeffs(models,X,
     return K
 
 # Process database in order to get all the microstructural data.
-ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht))
+ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht),shuffle_seed=seed)
+# Split into train and test datasets.
+N = ms_df.shape[0]
+N_train = int(np.rint(N*(1.-test_frac)))
+train_df = ms_df[:,:N_train]
+test_df  = ms_df[:,N_train:]
 
 # Setup initial kernel.
 if incl_ht:
@@ -314,35 +326,52 @@ def train_cohort_model(alpha_j,X,y,return_model=False):
 
 #result = minimize(train_cohort_model,[0.1],args=(X,y))
 
-# Get all the data for precipitate fraction and g/g' partitioning coeff. 
-# Store as tuples in a dict for fast access.
-elements = ["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
-ml_data_dict = {}
-for el in elements:
-    part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el)
-    if not part_coeff_header in ms_df:
-        part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ") # In case there's a space after the element name in the database.
-    ml_data_dict[el] = get_Xy(ms_df,part_coeff_header,min_max=[0.0,100.0],ht=incl_ht,log_y=learn_log_Ki)
-#ml_data_dict["f"] = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
-f_data = get_Xy(ms_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
-# output_head = "        \t"+"       \t".join(elements + ["f"]) # Holdover from when krr model was used for f
-output_head = "        \t"+"       \t".join(elements)
+############################### DATA SECTION ##################################
 
-# Target data
-#X_ms = ml_data_dict["f"][0]
-X_ms = f_data[0]
-x_comp = 0.01*(ms_df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
-x_comp_full = np.c_[1.0-x_comp.sum(axis=1),x_comp]
-x_prc_target = 0.01*(ms_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
-#f = ml_data_dict["f"][1].reshape(-1,1)
-f = 0.01*f_data[1].reshape(-1,1)
-N = x_comp.shape[0]
-# can also calculate an error if mean compositions were used here.
+elements = ["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
+output_head = "        \t"+"       \t".join(elements)+"\n"
+
+# Process all the data from a database:
+def process_all_data(df): 
+    # Get all the data for precipitate fraction and g/g' partitioning coeff. 
+    # Store as tuples in a dict for fast access.
+    ml_data_dict = {}
+    for el in elements:
+        part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el)
+        if not part_coeff_header in df:
+            part_coeff_header = ("γ/γ’ partitioning ratio","at. %",el+" ") # In case there's a space after the element name in the database.
+        ml_data_dict[el] = get_Xy(df,part_coeff_header,min_max=[0.0,100.0],ht=incl_ht,log_y=learn_log_Ki)
+    #ml_data_dict["f"] = get_Xy(df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
+    f_data = get_Xy(df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
+    # output_head = "        \t"+"       \t".join(elements + ["f"]) # Holdover from when krr model was used for f
+    
+    # Target data
+    #X_ms = ml_data_dict["f"][0]
+    X_ms = f_data[0]
+    x_comp = 0.01*(df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
+    x_comp_full = np.c_[1.0-x_comp.sum(axis=1),x_comp]
+    x_prc_target = 0.01*(df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
+    #f = ml_data_dict["f"][1].reshape(-1,1)
+    f = 0.01*f_data[1].reshape(-1,1)
+    return ml_data_dict, f_data, X_ms, x_comp, x_comp_full, x_prc_target, f
+
+ml_data_dict,  f_data,  X_ms,  x_comp,  x_comp_full,  x_prc_target,  f   = process_all_data(train_df)
+ml_data_dict_t,f_data_t,X_ms_t,x_comp_t,x_comp_full_t,x_prc_target_t,f_t = process_all_data(test_df)
+
+# Split into test/training datasets
+
+###############################################################################
+
+# Initial error calculations:
+# can calculate an error if mean compositions were used here.
 mu = 2.0 # Weighting of overall precipitate fraction in the score.
-#error_0 = (0.5*mu*(f-f.mean())**2 + (1.e-4*(f.mean()*x_prc_target.mean(axis=0)-f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
 frac_error_0 = 0.5*((f - f.mean())**2).mean(axis=0)
 phase_error_0 = (((f*x_prc_target - f.mean()*x_prc_target.mean(axis=0))**2).sum(axis=1,keepdims=True)).mean(axis=0)
 error_0 = mu*frac_error_0 + phase_error_0
+# And repeat for test dataset
+frac_error_0_t = 0.5*((f_t - f_t.mean())**2).mean(axis=0)
+phase_error_0_t = (((f_t*x_prc_target_t - f_t.mean()*x_prc_target_t.mean(axis=0))**2).sum(axis=1,keepdims=True)).mean(axis=0)
+error_0_t = mu*frac_error_0_t + phase_error_0_t
 
 # Kernel ridge model for each microstructural property.
 next_alpha = {ms_prop:0.1 for ms_prop in ml_data_dict.keys()}
@@ -438,10 +467,10 @@ def calc_microstruc_error(sij,v=1):
         opt_models = deepcopy(models)
         best_error = copy(error)
         if v >= 1:
-            print("Overall error  = {:.6f}   |   score = {:.5f}  <----NEW BEST".format(error[0],score[0]))
+            print("Overall error  = {:.6f}   |   score = {:.5f}  <----NEW BEST\n".format(error[0],score[0]))
             print("".join(130*["-"])+"\n")
     elif v >= 1:
-        print("Overall error  = {:.6f}   |   score = {:.5f}".format(error[0],score[0]))
+        print("Overall error  = {:.6f}   |   score = {:.5f}\n".format(error[0],score[0]))
         print("".join(130*["-"])+"\n")
     # Finally return error
     return error
@@ -624,6 +653,9 @@ def calc_prc_frac(x_comp,part_coeffs,f_tol,
 ##############################################################################
 
 if __name__ == '__main__':
+    print("\n\n+++++++++++++++++++ PARAMETERS +++++++++++++++++++\n\n")  
+    [print("{:}\t: {:}".format(key,value)) for key,value in dict(config[config_type]).items()]
+    print("\n\n+++++++++++++++++ MAIN ROUTINE +++++++++++++++++\n\n")    
     # Now minimise the microstructural error over the kernel parameters.
     v = 2 # verbosity of output
     if incl_ht:
@@ -651,7 +683,28 @@ if __name__ == '__main__':
                                "gtol":5.e-3,
                                "eps":eps})
     # Pickle the optimised models that were found.
+    print("\n\n++++++++++++++ OPTIMISATION COMPLETE ++++++++++++++\n\n")  
     with open(opt_models_pkl,"wb") as pickle_out:
         pickle.dump(opt_models,pickle_out)
     print("\nResult of fitting kernel parameters:\n")
     print(result)
+    # Print results of model on test data
+    print("\n\n++++++++++++++ TEST DATA STATISTICS ++++++++++++++\n\n")
+    print("\nNumber of microstructures in training data set = {:}\n".format(N_train))
+    print("Number of microstructures in test data set     = {:}\n".format(N-N_train))
+    # Calculations for test dataset
+    k_pred_t = predict_part_coeffs(opt_models,X_ms_t,log_models=learn_log_Ki)
+    f_pred_t = np.array([calc_prc_frac(x,k,0.005) for k,x in zip(k_pred_t,x_comp_t)]).reshape(-1,1)
+    x_prc_t = x_comp_full_t/((1.0 - f_pred_t)*k_pred_t + f_pred_t)
+    frac_error = 0.5*((f_t - f_pred_t)**2).mean(axis=0)
+    # old version:
+    #phase_error = (((f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
+    # new version:
+    phase_error = (((f_pred_t*x_prc_t - f_t*x_prc_target_t)**2).sum(axis=1,keepdims=True)).mean(axis=0)    
+    error = mu*frac_error + phase_error
+    score = 1.0 - error/error_0_t
+    frac_score = 1.0 - frac_error/frac_error_0_t
+    phase_score = 1.0 - phase_error/phase_error_0_t
+    print("\nFraction error = {:.6f}   |   score = {:.5f}".format(frac_error[0],frac_score[0]))
+    print("Phase error    = {:.6f}   |   score = {:.5f}".format(phase_error[0],phase_score[0]))
+    print("Overall error  = {:.6f}   |   score = {:.5f}\n".format(error[0],score[0]))
