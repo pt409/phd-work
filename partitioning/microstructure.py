@@ -283,8 +283,8 @@ ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht),shuffle_se
 # Split into train and test datasets.
 N = ms_df.shape[0]
 N_train = int(np.rint(N*(1.-test_frac)))
-train_df = ms_df[:,:N_train]
-test_df  = ms_df[:,N_train:]
+train_df = ms_df.iloc[:N_train,:]
+test_df  = ms_df.iloc[N_train:,:]
 
 # Setup initial kernel.
 if incl_ht:
@@ -683,13 +683,13 @@ if __name__ == '__main__':
                                "gtol":5.e-3,
                                "eps":eps})
     # Pickle the optimised models that were found.
-    print("\n\n++++++++++++++ OPTIMISATION COMPLETE ++++++++++++++\n\n")  
+    print("\n\n++++++++++++++ OPTIMISATION COMPLETE ++++++++++++++")  
     with open(opt_models_pkl,"wb") as pickle_out:
         pickle.dump(opt_models,pickle_out)
     print("\nResult of fitting kernel parameters:\n")
     print(result)
     # Print results of model on test data
-    print("\n\n++++++++++++++ TEST DATA STATISTICS ++++++++++++++\n\n")
+    print("\n\n++++++++++++++ TEST DATA STATISTICS ++++++++++++++")
     print("\nNumber of microstructures in training data set = {:}\n".format(N_train))
     print("Number of microstructures in test data set     = {:}\n".format(N-N_train))
     # Calculations for test dataset
