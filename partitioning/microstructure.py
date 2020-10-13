@@ -28,7 +28,7 @@ config = configparser.ConfigParser()
 config.read("microstructure.input")
 if len(sys.argv) > 1: 
     config_type = sys.argv[1]
-else: config_type = "special_rbf_test"
+else: config_type = "rbf_test"
 incl_ht = config[config_type].getboolean("incl_ht")
 learn_log_Ki = config[config_type].getboolean("learn_log_Ki")
 comp_kernel_type = config[config_type].get("comp_kernel_type")
@@ -38,7 +38,7 @@ database = config[config_type].get("database")
 test_frac = config[config_type].getfloat("test_pc")/100.0
 
 # Seed for test/train data splitting
-seed = None
+seed = 1934
 
 # This is a legacy param from previous version of code and needs to be deleted.
 squash_dof = False # Whether to fit "squash" params for composition part of kernel.
@@ -277,6 +277,12 @@ def predict_part_coeffs(models,X,
     if log_models:
         K = np.exp(K)
     return K
+
+def predict_microstructure(models,X_ms,x_comp,x_comp_full):
+    k_pred = predict_part_coeffs(models,X_ms,log_models=learn_log_Ki)
+    f_pred = np.array([calc_prc_frac(x,k,0.005) for k,x in zip(k_pred,x_comp)]).reshape(-1,1)
+    x_prc = x_comp_full/((1.0 - f_pred)*k_pred + f_pred)
+    return k_pred, f_pred, x_prc
 
 # Process database in order to get all the microstructural data.
 ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht),shuffle_seed=seed)
