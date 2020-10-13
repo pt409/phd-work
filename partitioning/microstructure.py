@@ -24,11 +24,14 @@ import sys
 
 # Some options.
 # Uses a configparser file (.ini structure).
+config_default = "rbf_ht_kernel"
 config = configparser.ConfigParser()
 config.read("microstructure.input")
-if len(sys.argv) > 1: 
-    config_type = sys.argv[1]
-else: config_type = "rbf_test"
+if len(sys.argv) > 1:
+    if sys.argv[1] in config.sections():
+        config_type = sys.argv[1]
+    else: config_type = config_default
+else: config_type = config_default
 incl_ht = config[config_type].getboolean("incl_ht")
 learn_log_Ki = config[config_type].getboolean("learn_log_Ki")
 comp_kernel_type = config[config_type].get("comp_kernel_type")
