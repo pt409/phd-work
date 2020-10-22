@@ -44,7 +44,7 @@ test_frac = config[config_type].getfloat("test_pc")/100.0
 seed = 1934
 
 # This is a legacy param from previous version of code and needs to be deleted.
-squash_dof = False # Whether to fit "squash" params for composition part of kernel.
+# squash_dof = False # Whether to fit "squash" params for composition part of kernel.
 
 ############################### DATA PROCESSING ###############################
 
@@ -121,52 +121,42 @@ def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
 
 # Class to define the unique kernel used.
 class rbf_kernel :
-    def __init__(self,si,gamma,dim):
+    def __init__(self,gamma,dim):
         self.tdim = dim+1
-        self.S = np.diag(np.append(si,1))
         self.gamma = gamma
         v = np.zeros(self.tdim)
         v[-1] = 1
         v -= np.ones(self.tdim)/np.sqrt(self.tdim)
         self.P = np.identity(self.tdim) - 2*np.outer(v,v)/np.inner(v,v)
         self.Idish = np.r_[np.identity(dim),np.ones((1,dim))]
-        
-    # Used internally to construct a kernel.
-    def construct_trans(self):
-        self.M = self.P@self.S@self.P@self.Idish
-    
+            
     # Calculate kernelised inner product.
     def kernel(self,x,y):
-        v = self.M@(x-y)
+        v = self.Idish@(x-y)
         return np.exp(-self.gamma*np.inner(v,v))
     
     # Update kernel parameters.
-    def update_params(self,si,gamma):
-        self.S = np.diag(np.append(si,1))
+    def update_params(self,gamma):
         self.gamma = gamma
-        self.construct_trans()
         
     @classmethod
-    def setup(cls,si,gamma):
-        dim = si.shape[0]
-        new_instance = cls(si,gamma,dim)
-        new_instance.construct_trans()
+    def setup(cls,gamma,dim):
+        new_instance = cls(gamma,dim)
         return new_instance
 
 class special_kernel(rbf_kernel) :
-    def __init__(self,si,gamma,dim):
-        super(special_kernel,self).__init__(si,gamma,dim)
+    def __init__(self,gamma,dim):
+        super(special_kernel,self).__init__(gamma,dim)
     
     # Calculate kernelised inner product.
     def kernel(self,x,y):
-        return np.exp(-self.gamma*np.linalg.norm(self.M@(x-y),1))
+        return np.exp(-self.gamma*np.linalg.norm(self.Idish@(x-y),1))
 
 # A special kernel to deal with having composition AND heat treatment.
 class multi_kernel(special_kernel):
-    def __init__(self,si,gamma,mu,comp_dim,ht_dim):
+    def __init__(self,gamma,comp_dim,ht_dim):
         # ht_dim is the number of heat treatments (temp+time)
-        special_kernel.__init__(self,si,gamma,comp_dim)
-        self.mu = mu
+        special_kernel.__init__(self,gamma,comp_dim)
         self.ht_dim = ht_dim
     
     # Gaussian rbf kernel
@@ -174,14 +164,8 @@ class multi_kernel(special_kernel):
         x_ht,x0 = self.split_vector(x)
         y_ht,y0 = self.split_vector(y)
         v = x_ht-y_ht
-        return np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-y0),1)
-                      +self.mu*np.inner(v,v)))
-    
-    def update_params(self,si,gamma,mu):
-        self.S = np.diag(np.append(si,1))
-        self.gamma  = gamma
-        self.mu = mu
-        self.construct_trans()
+        return np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-y0),1)
+                      + np.inner(v,v)))
     
     def split_vector(self,x):
         x_ht = x[:2*self.ht_dim]
@@ -189,28 +173,38 @@ class multi_kernel(special_kernel):
         return x_ht,x0
     
     @classmethod
-    def setup(cls,si,gamma,mu,ht_dim):
-        comp_dim = si.shape[0]
-        new_instance = cls(si,gamma,mu,comp_dim,ht_dim)
-        new_instance.construct_trans()
+    def setup(cls,gamma,comp_dim,ht_dim):
+        new_instance = cls(gamma,comp_dim,ht_dim)
         return new_instance
     
 # Variant of above with different kernel for heat treatment
 class poly_kernel(multi_kernel):
-    def __init__(self,si,gamma,mu,comp_dim,ht_dim):
-        super(poly_kernel,self).__init__(si,gamma,mu,comp_dim,ht_dim)
+    def __init__(self,gamma,mu,comp_dim,ht_dim):
+        super(poly_kernel,self).__init__(gamma,comp_dim,ht_dim)
+        self.mu = mu
     
     # Polynomial kernel
+    # ... well, quadratic
     def kernel(self,x,y,offset=1.0):
         x_ht,x0 = self.split_vector(x)
         y_ht,y0 = self.split_vector(y)
-        return (np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-y0),1)))
+        return (np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-y0),1)))
                 * (self.mu*np.inner(x_ht,y_ht)+offset)**2)
+    
+    # Update kernel parameters.
+    def update_params(self,gamma):
+        self.gamma = gamma
+        self.mu = mu
+        
+    @classmethod
+    def setup(cls,gamma,mu,comp_dim,ht_dim):
+        new_instance = cls(gamma,mu,comp_dim,ht_dim)
+        return new_instance
         
 # Another variant (this version uses the original kernel as used in 1st year report).
 class unordered_kernel(multi_kernel):
-    def __init__(self, si, gamma, mu, comp_dim, ht_dim):
-        super(unordered_kernel,self).__init__(si,gamma,mu,comp_dim,ht_dim)
+    def __init__(self, gamma, comp_dim, ht_dim):
+        super(unordered_kernel,self).__init__(gamma,comp_dim,ht_dim)
     
     def split_vector(self,x):
         t = x[:self.ht_dim]
@@ -223,8 +217,8 @@ class unordered_kernel(multi_kernel):
     def kernel(self,x,y):
         T0,t0,x0 = self.split_vector(x)
         T1,t1,x1 = self.split_vector(y)
-        return np.exp(-self.gamma *(np.linalg.norm(self.M@(x0-x1),1)
-                      +self.mu*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
+        return np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-x1),1)
+                      +np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
     
 ############################### MAIN SUBROUTINES ##############################
     
@@ -287,6 +281,8 @@ def predict_microstructure(models,X_ms,x_comp,x_comp_full):
     x_prc = x_comp_full/((1.0 - f_pred)*k_pred + f_pred)
     return k_pred, f_pred, x_prc
 
+############################### DATA SECTION ##################################
+
 # Process database in order to get all the microstructural data.
 ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht),shuffle_seed=seed)
 # Split into train and test datasets.
@@ -295,47 +291,6 @@ N_train = int(np.rint(N*(1.-test_frac)))
 train_df = ms_df.iloc[:N_train,:]
 test_df  = ms_df.iloc[N_train:,:]
 
-# Setup initial kernel.
-if incl_ht:
-    # Have 3 different options for heat treatment kernels
-    if ht_kernel_type == "poly":
-        my_kernel = poly_kernel.setup(np.ones(9),0.1,0.1,3)
-    elif ht_kernel_type == "unordered":
-        my_kernel = unordered_kernel.setup(np.ones(9),0.1,0.1,3)
-    else:
-        my_kernel = multi_kernel.setup(np.ones(9),0.1,0.1,3)
-else:
-    # Have 2 different options for kernels.
-    if comp_kernel_type == "special":
-        my_kernel = special_kernel.setup(np.ones(9),0.1) # 9 is dimensionality of composition data.
-    else: 
-        my_kernel = rbf_kernel.setup(np.ones(9),0.1)
-
-# inner-most function of the main procedure, trains a krr model for a given property...
-# ... for an entire cohort so that this can be used in a minimization function to optimise...
-# ... cross-validation score.
-def train_cohort_model(alpha_j,X,y,return_model=False):
-    loo = LeaveOneOut()
-    n = loo.get_n_splits(X)
-    krr_cohort = cohort_model(n)
-    gcv = 0 # Generalised cross validation error
-    for train_i,val_i in loo.split(X):
-        X_train, X_val = X[train_i], X[val_i]
-        y_train, y_val = y[train_i], y[val_i]
-        krr_i = KernelRidge(alpha=alpha_j,kernel=my_kernel.kernel) # The kernel ridge regression model.
-        krr_i.fit(X_train,y_train)
-        dy = y_val - krr_i.predict(X_val)
-        gcv += np.dot(dy,dy)/(dy.shape[0])
-        krr_cohort.add_model(krr_i)
-    gcv /= n
-    if return_model:
-        return krr_cohort # This way the model can be accessed without returning it.
-    else:
-        return gcv
-
-#result = minimize(train_cohort_model,[0.1],args=(X,y))
-
-############################### DATA SECTION ##################################
 
 elements = ["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
 output_head = "        \t"+"       \t".join(elements)+"\n"
@@ -371,6 +326,50 @@ ml_data_dict_t,f_data_t,X_ms_t,x_comp_t,x_comp_full_t,x_prc_target_t,f_t = proce
 
 ###############################################################################
 
+# Setup initial kernel.
+comp_dim = x_comp.shape[1]
+if incl_ht:
+    ht_dim = (X_ms.shape[1]-comp_dim)//2
+    # Have 3 different options for heat treatment kernels
+    if ht_kernel_type == "poly":
+        my_kernel = poly_kernel.setup(0.1,0.1,comp_dim,ht_dim)
+    elif ht_kernel_type == "unordered":
+        my_kernel = unordered_kernel.setup(0.1,0.1,comp_dim,ht_dim)
+    else:
+        my_kernel = multi_kernel.setup(0.1,0.1,comp_dim,ht_dim)
+else:
+    # Have 2 different options for kernels.
+    if comp_kernel_type == "special":
+        my_kernel = special_kernel.setup(0.1,comp_dim) # 9 is dimensionality of composition data.
+    else: 
+        my_kernel = rbf_kernel.setup(0.1,comp_dim)
+
+# inner-most function of the main procedure, trains a krr model for a given property...
+# ... for an entire cohort so that this can be used in a minimization function to optimise...
+# ... cross-validation score.
+def train_cohort_model(alpha_j,X,y,return_model=False):
+    loo = LeaveOneOut()
+    n = loo.get_n_splits(X)
+    krr_cohort = cohort_model(n)
+    gcv = 0 # Generalised cross validation error
+    for train_i,val_i in loo.split(X):
+        X_train, X_val = X[train_i], X[val_i]
+        y_train, y_val = y[train_i], y[val_i]
+        krr_i = KernelRidge(alpha=alpha_j,kernel=my_kernel.kernel) # The kernel ridge regression model.
+        krr_i.fit(X_train,y_train)
+        dy = y_val - krr_i.predict(X_val)
+        gcv += np.dot(dy,dy)/(dy.shape[0])
+        krr_cohort.add_model(krr_i)
+    gcv /= n
+    if return_model:
+        return krr_cohort # This way the model can be accessed without returning it.
+    else:
+        return gcv
+
+#result = minimize(train_cohort_model,[0.1],args=(X,y))
+
+###############################################################################
+
 # Initial error calculations:
 # can calculate an error if mean compositions were used here.
 mu = 2.0 # Weighting of overall precipitate fraction in the score.
@@ -388,30 +387,14 @@ models = {}
 opt_models = {}
 best_error = np.inf
 # Define as a function for use with minimiser. This is used to optimise the kernel.
-def calc_microstruc_error(sij,v=1):
+def calc_microstruc_error(kernel_params,v=1):
     # v is the verbosity, 0, 1 or 2 (most verbose).
     # First update the kernel with new parameters:
     global my_kernel
-    if incl_ht:
-        if squash_dof:
-            gamma, sij = tuple(sij[-2:]), sij[:-2]
-            sij = np.insert(sij,0,1.0) # Don't need to stretch in every possible direction.
-        else:
-            gamma = tuple(sij[-2:])
-            sij = np.ones(9)
-    else:
-        if squash_dof:
-            gamma, sij = tuple(sij[-1:]), sij[:-1]
-            sij = np.insert(sij,0,1.0) # Don't need to stretch in every possible direction.
-        else:
-            gamma = tuple(sij[-1:])
-            sij = np.ones(9)
-    my_kernel.update_params(sij,*gamma)    
+    my_kernel.update_params(*kernel_params)    
     if v >= 1:
         print("Kernel parameters for this iteration:")
-        if squash_dof:
-            print("s_ii =\t"+("\t".join("{:.5f}".format(_) for _ in sij.tolist())))
-        print("gamma =\t"+("\t".join("{:.6e}".format(_) for _ in gamma)))
+        print("gamma =\t"+("\t".join("{:.6e}".format(_) for _ in kernel_params)))
         print("\nBeginning to fit kernel ridge models for partitioning coefficients.")
     # Loop through each microstructural property and train optimal krr model using cv.
     # Store some values calculated for output purposes.
@@ -667,24 +650,14 @@ if __name__ == '__main__':
     print("\n\n+++++++++++++++++ MAIN ROUTINE +++++++++++++++++\n\n")    
     # Now minimise the microstructural error over the kernel parameters.
     v = 2 # verbosity of output
-    if incl_ht:
-        if squash_dof:
-            sij_init = np.ones(10)
-            sij_init[-2] = 0.1 # Represents the gamma parameters.
-            sij_init[-1] = 1.e-4 # The gamma1 parameter.
-        else:
-            sij_init = 0.1*np.ones(2)
-            sij_init[-1] = 1.e-4 # The gamma1 parameter.
+    if ht_kernel_type == "poly":
+        kernel_params_init = np.array([0.1,1.0])
     else:
-        if squash_dof:
-            sij_init = np.ones(9)
-            sij_init[-1] = 0.1 # Represents the gamma parameter.
-        else:
-            sij_init = 0.1*np.ones(1)
-    eps = 5.e-4*sij_init
-    bounds = sij_init.shape[0]*[(0.,None)]
+        kernel_params_init = np.array([0.1])
+    eps = 5.e-4*kernel_params_init
+    bounds = kernel_params_init.shape[0]*[(0.,None)]
     result = minimize(calc_microstruc_error,
-                      sij_init,
+                      kernel_params_init,
                       args=(v,),
                       method="L-BFGS-B",
                       bounds=bounds,
