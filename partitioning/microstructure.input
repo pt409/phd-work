@@ -6,6 +6,8 @@ ht_kernel_type = rbf
 output_models = rigorous/final_models.pkl
 database = ../datasets/processing/processed_alloy_database_v4.csv
 test_pc = 13.0
+seed = 1934
+error_weight = 1.0
 
 [rbf_test]
 incl_ht = false

@@ -39,9 +39,8 @@ ht_kernel_type = config[config_type].get("ht_kernel_type")
 opt_models_pkl = config[config_type].get("output_models")
 database = config[config_type].get("database")
 test_frac = config[config_type].getfloat("test_pc")/100.0
-
-# Seed for test/train data splitting
-seed = 1934
+seed = config[config_type].getint("seed")
+error_weight = config[config_type].getfloat("error_weight")
 
 # This is a legacy param from previous version of code and needs to be deleted.
 # squash_dof = False # Whether to fit "squash" params for composition part of kernel.
@@ -154,10 +153,12 @@ class special_kernel(rbf_kernel) :
 
 # A special kernel to deal with having composition AND heat treatment.
 class multi_kernel(special_kernel):
-    def __init__(self,gamma,comp_dim,ht_dim):
+    def __init__(self,gamma,comp_dim,ht_dim,r=1.e-3):
         # ht_dim is the number of heat treatments (temp+time)
+        # r is relative weighting of ht and comp parts of kernel.
         special_kernel.__init__(self,gamma,comp_dim)
         self.ht_dim = ht_dim
+        self.r = r
     
     # Gaussian rbf kernel
     def kernel(self,x,y):
@@ -165,7 +166,7 @@ class multi_kernel(special_kernel):
         y_ht,y0 = self.split_vector(y)
         v = x_ht-y_ht
         return np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-y0),1)
-                      + np.inner(v,v)))
+                      +self.r * np.inner(v,v)))
     
     def split_vector(self,x):
         x_ht = x[:2*self.ht_dim]
@@ -203,8 +204,8 @@ class poly_kernel(multi_kernel):
         
 # Another variant (this version uses the original kernel as used in 1st year report).
 class unordered_kernel(multi_kernel):
-    def __init__(self, gamma, comp_dim, ht_dim):
-        super(unordered_kernel,self).__init__(gamma,comp_dim,ht_dim)
+    def __init__(self, gamma, comp_dim, ht_dim,r=1.e-3):
+        super(unordered_kernel,self).__init__(gamma,comp_dim,ht_dim,r=r)
     
     def split_vector(self,x):
         t = x[:self.ht_dim]
@@ -218,7 +219,7 @@ class unordered_kernel(multi_kernel):
         T0,t0,x0 = self.split_vector(x)
         T1,t1,x1 = self.split_vector(y)
         return np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-x1),1)
-                      +np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
+                      +self.r*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
     
 ############################### MAIN SUBROUTINES ##############################
     
@@ -333,10 +334,8 @@ if incl_ht:
     # Have 3 different options for heat treatment kernels
     if ht_kernel_type == "poly":
         my_kernel = poly_kernel.setup(0.1,0.1,comp_dim,ht_dim)
-    elif ht_kernel_type == "unordered":
-        my_kernel = unordered_kernel.setup(0.1,0.1,comp_dim,ht_dim)
     else:
-        my_kernel = multi_kernel.setup(0.1,0.1,comp_dim,ht_dim)
+        my_kernel = unordered_kernel.setup(0.1,comp_dim,ht_dim)
 else:
     # Have 2 different options for kernels.
     if comp_kernel_type == "special":
@@ -372,7 +371,7 @@ def train_cohort_model(alpha_j,X,y,return_model=False):
 
 # Initial error calculations:
 # can calculate an error if mean compositions were used here.
-mu = 2.0 # Weighting of overall precipitate fraction in the score.
+mu = 1.*error_weight # Weighting of overall precipitate fraction in the score.
 frac_error_0 = 0.5*((f - f.mean())**2).mean(axis=0)
 phase_error_0 = (((f*x_prc_target - f.mean()*x_prc_target.mean(axis=0))**2).sum(axis=1,keepdims=True)).mean(axis=0)
 error_0 = mu*frac_error_0 + phase_error_0
