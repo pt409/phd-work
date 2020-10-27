@@ -6,7 +6,7 @@ ht_kernel_type = rbf
 output_models = rigorous/final_models.pkl
 database = ../datasets/processing/processed_alloy_database_v4.csv
 test_pc = 13.0
-seed = 1934
+seed = 2106
 error_weight = 1.0
 
 [rbf_test]
@@ -22,6 +22,15 @@ output_models = rigorous/special_rbf_model.pkl
 [rbf_ht_kernel]
 ht_kernel_type = rbf
 output_models = rigorous/rbf_ht_model.pkl
+
+[all_rbf_kernel]
+ht_kernel_type = rbf
+comp_kernel_type = rbf
+output_models = rigorous/all_rbf_model.pkl
+
+[physical_ht_kernel]
+ht_kernel_type = unordered
+output_models = rigorous/physical_ht_kernel_model.pkl
 
 [poly_ht_kernel]
 ht_kernel_type = poly

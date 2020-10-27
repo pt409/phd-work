@@ -160,7 +160,6 @@ class multi_kernel(special_kernel):
         self.ht_dim = ht_dim
         self.r = r
     
-    # Gaussian rbf kernel
     def kernel(self,x,y):
         x_ht,x0 = self.split_vector(x)
         y_ht,y0 = self.split_vector(y)
@@ -178,6 +177,19 @@ class multi_kernel(special_kernel):
         new_instance = cls(gamma,comp_dim,ht_dim)
         return new_instance
     
+# As above but both kernels are simple Gaussian RBF.
+class multi_rbf_kernel(multi_kernel):
+    def __init__(self,gamma,comp_dim,ht_dim,r=1.e-3):
+        super(multi_rbf_kernel,self).__init__(gamma,comp_dim,ht_dim,r)
+        
+    def kernel(self,x,y):
+        x_ht,x0 = self.split_vector(x)
+        y_ht,y0 = self.split_vector(y)
+        v = self.Idish@(x0-y0)
+        w = x_ht-y_ht
+        return np.exp(-self.gamma *(np.inner(v,v)
+                      +self.r * np.inner(w,w)))
+    
 # Variant of above with different kernel for heat treatment
 class poly_kernel(multi_kernel):
     def __init__(self,gamma,mu,comp_dim,ht_dim):
@@ -193,7 +205,7 @@ class poly_kernel(multi_kernel):
                 * (self.mu*np.inner(x_ht,y_ht)+offset)**2)
     
     # Update kernel parameters.
-    def update_params(self,gamma):
+    def update_params(self,gamma,mu):
         self.gamma = gamma
         self.mu = mu
         
@@ -334,6 +346,11 @@ if incl_ht:
     # Have 3 different options for heat treatment kernels
     if ht_kernel_type == "poly":
         my_kernel = poly_kernel.setup(0.1,0.1,comp_dim,ht_dim)
+    elif ht_kernel_type == "rbf":
+        if comp_kernel_type == "rbf":
+            my_kernel = multi_rbf_kernel.setup(0.1,comp_dim,ht_dim)
+        else:
+            my_kernel = multi_kernel.setup(0.1,comp_dim,ht_dim)
     else:
         my_kernel = unordered_kernel.setup(0.1,comp_dim,ht_dim)
 else:
@@ -650,7 +667,7 @@ if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
     v = 2 # verbosity of output
     if ht_kernel_type == "poly":
-        kernel_params_init = np.array([0.1,1.0])
+        kernel_params_init = np.array([0.1,1.e-6])
     else:
         kernel_params_init = np.array([0.1])
     eps = 5.e-4*kernel_params_init
