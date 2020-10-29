@@ -14,6 +14,7 @@ import pickle
 from sklearn.metrics import r2_score # mean_squared_error
 from sklearn.model_selection import LeaveOneOut # cross_validate
 from sklearn.kernel_ridge import KernelRidge
+from sklearn.preprocessing import StandardScaler
 
 from scipy.optimize import minimize
 
@@ -41,6 +42,7 @@ database = config[config_type].get("database")
 test_frac = config[config_type].getfloat("test_pc")/100.0
 seed = config[config_type].getint("seed")
 error_weight = config[config_type].getfloat("error_weight")
+standardise = config[config_type].getboolean("standardise")
 
 # This is a legacy param from previous version of code and needs to be deleted.
 # squash_dof = False # Whether to fit "squash" params for composition part of kernel.
@@ -332,10 +334,15 @@ def process_all_data(df):
     f = 0.01*f_data[1].reshape(-1,1)
     return ml_data_dict, f_data, X_ms, x_comp, x_comp_full, x_prc_target, f
 
+# Split into test/training datasets
 ml_data_dict,  f_data,  X_ms,  x_comp,  x_comp_full,  x_prc_target,  f   = process_all_data(train_df)
 ml_data_dict_t,f_data_t,X_ms_t,x_comp_t,x_comp_full_t,x_prc_target_t,f_t = process_all_data(test_df)
 
-# Split into test/training datasets
+# Scale data
+if standardise:
+    scaler = StandardScaler()
+    X_ms = scaler.fit_transform(X_ms)
+    X_ms_t = scaler.transform(X_ms_t)
 
 ###############################################################################
 
