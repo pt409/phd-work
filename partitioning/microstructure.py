@@ -26,7 +26,7 @@ import sys
 
 # Some options.
 # Uses a configparser file (.ini structure).
-config_default = "rbf_ht_kernel"
+config_default = "rbf_test"
 config = configparser.ConfigParser()
 config.read("microstructure.input")
 if len(sys.argv) > 1:
@@ -421,8 +421,6 @@ def train_cohort_model(alpha_j,X,y,return_model=False):
     else:
         return gcv
 
-#result = minimize(train_cohort_model,[0.1],args=(X,y))
-
 ###############################################################################
 
 # Initial error calculations:
@@ -457,7 +455,6 @@ def calc_microstruc_error(kernel_params,v=1):
     score_output =  "R^2    =\t"
     cv_output =  "CV err =\t"
     for ms_prop, ms_data in ml_data_dict.items():
-        
         if v>=2: print("{} part. coeff. ...".format(ms_prop))
         result = minimize(train_cohort_model,
                           next_alpha[ms_prop],
@@ -468,7 +465,7 @@ def calc_microstruc_error(kernel_params,v=1):
                                    "gtol":3.e-3,
                                    "eps":5.e-4})
         opt_alpha = result.x
-        next_alpha[ms_prop] = opt_alpha
+        #next_alpha[ms_prop] = opt_alpha
         krr_model = train_cohort_model(opt_alpha,*ms_data,return_model=True)
         models[ms_prop] = krr_model
         if v >= 2:
@@ -706,18 +703,19 @@ if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
     v = 2 # verbosity of output
     if ht_kernel_type == "poly":
-        kernel_params_init = np.array([1.e-2,1.e-3])
+        kernel_params_init = np.array([1.e-1,1.e-3])
     else:
-        kernel_params_init = np.array([1.e-2])
+        kernel_params_init = np.array([1.e-1])
     # Carry out a preliminary search of the parameters. 
     if prelim_search:
         print("\nStarting initial grid search for kernel parameters...\n")
-        for kernel_params in product(*list(np.array([(10**m)*kernel_params_init for m in range(-2,3)]).T)):
+        for kernel_params in product(*list(np.array([(10**m)*kernel_params_init for m in range(-3,4)]).T)):
+            kernel_params = np.array(kernel_params)
             new_error = calc_microstruc_error(kernel_params,v=v)
             if new_error == best_error:
-                kernel_params_init = np.array(kernel_params)
+                kernel_params_init = copy(kernel_params)
         print("\n---------------------------------------------------\nGrid search complete.\n---------------------------------------------------\n")
-    eps = 5.e-2*kernel_params_init
+    eps = 1.e-4*kernel_params_init
     bounds = kernel_params_init.shape[0]*[(0.,None)]
     print("\nStarting LBFGS optimisation of kernel parameters...\n")
     result = minimize(calc_microstruc_error,
@@ -725,8 +723,8 @@ if __name__ == '__main__':
                       args=(v,),
                       method="L-BFGS-B",
                       bounds=bounds,
-                      options={"ftol":5.e-3,
-                               "gtol":5.e-3,
+                      options={"ftol":1.e-3,
+                               "gtol":1.e-3,
                                "eps":eps})
     # Pickle the optimised models that were found.
     print("\n\n++++++++++++++ OPTIMISATION COMPLETE ++++++++++++++")  
