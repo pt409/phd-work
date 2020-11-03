@@ -14,9 +14,10 @@ import pickle
 from sklearn.metrics import r2_score # mean_squared_error
 from sklearn.model_selection import LeaveOneOut # cross_validate
 from sklearn.kernel_ridge import KernelRidge
-from sklearn.preprocessing import StandardScaler
 
 from scipy.optimize import minimize
+
+from itertools import product
 
 from copy import deepcopy,copy
 
@@ -42,10 +43,9 @@ database = config[config_type].get("database")
 test_frac = config[config_type].getfloat("test_pc")/100.0
 seed = config[config_type].getint("seed")
 error_weight = config[config_type].getfloat("error_weight")
-standardise = config[config_type].getboolean("standardise")
-
-# This is a legacy param from previous version of code and needs to be deleted.
-# squash_dof = False # Whether to fit "squash" params for composition part of kernel.
+standardise_ht = config[config_type].getboolean("standardise_ht")
+standardise_comp = config[config_type].getboolean("standardise_comp")
+prelim_search = config[config_type].getboolean("prelim_search")
 
 ############################### DATA PROCESSING ###############################
 
@@ -125,24 +125,27 @@ class rbf_kernel :
     def __init__(self,gamma,dim):
         self.tdim = dim+1
         self.gamma = gamma
-        v = np.zeros(self.tdim)
-        v[-1] = 1
-        v -= np.ones(self.tdim)/np.sqrt(self.tdim)
-        self.P = np.identity(self.tdim) - 2*np.outer(v,v)/np.inner(v,v)
         self.Idish = np.r_[np.identity(dim),np.ones((1,dim))]
+        self.scale = np.diag(np.ones(self.tdim))
             
     # Calculate kernelised inner product.
     def kernel(self,x,y):
-        v = self.Idish@(x-y)
+        v = self.scale @ self.Idish @ (x-y)
         return np.exp(-self.gamma*np.inner(v,v))
     
     # Update kernel parameters.
     def update_params(self,gamma):
         self.gamma = gamma
         
+    # Add scaling for standardisation
+    def add_comp_scaling(self,scale):
+        self.scale = np.diag(scale**-1)
+        
     @classmethod
-    def setup(cls,gamma,dim):
+    def setup(cls,gamma,dim,scale=None):
         new_instance = cls(gamma,dim)
+        if scale:
+            new_instance.scale = np.diag(scale**-1)
         return new_instance
 
 class special_kernel(rbf_kernel) :
@@ -151,22 +154,23 @@ class special_kernel(rbf_kernel) :
     
     # Calculate kernelised inner product.
     def kernel(self,x,y):
-        return np.exp(-self.gamma*np.linalg.norm(self.Idish@(x-y),1))
+        return np.exp(-self.gamma*np.linalg.norm(self.scale @ self.Idish @ (x-y),1))
 
 # A special kernel to deal with having composition AND heat treatment.
 class multi_kernel(special_kernel):
-    def __init__(self,gamma,comp_dim,ht_dim,r=1.e-3):
+    def __init__(self,gamma,comp_dim,ht_dim,r=1.):
         # ht_dim is the number of heat treatments (temp+time)
         # r is relative weighting of ht and comp parts of kernel.
         special_kernel.__init__(self,gamma,comp_dim)
         self.ht_dim = ht_dim
         self.r = r
+        self.ht_scale = np.diag(np.ones(2*self.ht_dim))
     
     def kernel(self,x,y):
         x_ht,x0 = self.split_vector(x)
         y_ht,y0 = self.split_vector(y)
-        v = x_ht-y_ht
-        return np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-y0),1)
+        v = self.ht_scale @ (x_ht-y_ht)
+        return np.exp(-self.gamma *(np.linalg.norm(self.scale @ self.Idish @ (x0-y0),1)
                       +self.r * np.inner(v,v)))
     
     def split_vector(self,x):
@@ -174,22 +178,30 @@ class multi_kernel(special_kernel):
         x0 = x[2*self.ht_dim:]
         return x_ht,x0
     
+    # Add scaling for standardisation
+    def add_ht_scaling(self,ht_scale):
+        self.ht_scale = np.diag(ht_scale**-1)
+    
     @classmethod
-    def setup(cls,gamma,comp_dim,ht_dim):
+    def setup(cls,gamma,comp_dim,ht_dim,comp_scale=None,ht_scale=None):
         new_instance = cls(gamma,comp_dim,ht_dim)
+        if comp_scale:
+            new_instance.scale = np.diag(comp_scale**-1)
+        if ht_scale:
+            new_instance.ht_scale = np.diag(ht_scale**-1)
         return new_instance
     
 # As above but both kernels are simple Gaussian RBF.
 class multi_rbf_kernel(multi_kernel):
-    def __init__(self,gamma,comp_dim,ht_dim,r=1.e-3):
+    def __init__(self,gamma,comp_dim,ht_dim,r=1.):
         super(multi_rbf_kernel,self).__init__(gamma,comp_dim,ht_dim,r)
         
     def kernel(self,x,y):
         x_ht,x0 = self.split_vector(x)
         y_ht,y0 = self.split_vector(y)
-        v = self.Idish@(x0-y0)
-        w = x_ht-y_ht
-        return np.exp(-self.gamma *(np.inner(v,v)
+        v = self.scale @ self.Idish@(x0-y0)
+        w = self.ht_scale @ (x_ht-y_ht)
+        return np.exp(-self.gamma * (np.inner(v,v)
                       +self.r * np.inner(w,w)))
     
 # Variant of above with different kernel for heat treatment
@@ -203,8 +215,8 @@ class poly_kernel(multi_kernel):
     def kernel(self,x,y,offset=1.0):
         x_ht,x0 = self.split_vector(x)
         y_ht,y0 = self.split_vector(y)
-        return (np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-y0),1)))
-                * (self.mu*np.inner(x_ht,y_ht)+offset)**2)
+        return (np.exp(-self.gamma *(np.linalg.norm(self.scale @ self.Idish@(x0-y0),1)))
+                * (self.mu*np.inner(self.ht_scale @ x_ht,self.ht_scale @ y_ht)+offset)**2)
     
     # Update kernel parameters.
     def update_params(self,gamma,mu):
@@ -212,14 +224,19 @@ class poly_kernel(multi_kernel):
         self.mu = mu
         
     @classmethod
-    def setup(cls,gamma,mu,comp_dim,ht_dim):
+    def setup(cls,gamma,mu,comp_dim,ht_dim,comp_scale=None,ht_scale=None):
         new_instance = cls(gamma,mu,comp_dim,ht_dim)
+        if comp_scale:
+            new_instance.scale = np.diag(comp_scale**-1)
+        if ht_scale:
+            new_instance.ht_scale = np.diag(ht_scale**-1)
         return new_instance
         
 # Another variant (this version uses the original kernel as used in 1st year report).
 class unordered_kernel(multi_kernel):
-    def __init__(self, gamma, comp_dim, ht_dim,r=1.e-3):
+    def __init__(self, gamma, comp_dim, ht_dim,r=1.):
         super(unordered_kernel,self).__init__(gamma,comp_dim,ht_dim,r=r)
+        self.ht_scale = np.diag(np.ones(self.ht_dim))
     
     def split_vector(self,x):
         t = x[:self.ht_dim]
@@ -233,7 +250,7 @@ class unordered_kernel(multi_kernel):
         T0,t0,x0 = self.split_vector(x)
         T1,t1,x1 = self.split_vector(y)
         return np.exp(-self.gamma *(np.linalg.norm(self.Idish@(x0-x1),1)
-                      +self.r*np.abs(np.linalg.norm(T0*t0)-np.linalg.norm(T1*t1))))
+                      +self.r*np.abs(np.linalg.norm(self.ht_scale@(T0*t0)-np.linalg.norm(self.ht_scale@(T1*t1))))))
     
 ############################### MAIN SUBROUTINES ##############################
     
@@ -338,13 +355,7 @@ def process_all_data(df):
 ml_data_dict,  f_data,  X_ms,  x_comp,  x_comp_full,  x_prc_target,  f   = process_all_data(train_df)
 ml_data_dict_t,f_data_t,X_ms_t,x_comp_t,x_comp_full_t,x_prc_target_t,f_t = process_all_data(test_df)
 
-# Scale data
-if standardise:
-    scaler = StandardScaler()
-    X_ms = scaler.fit_transform(X_ms)
-    X_ms_t = scaler.transform(X_ms_t)
-
-###############################################################################
+################################# SETUP KERNEL ################################
 
 # Setup initial kernel.
 comp_dim = x_comp.shape[1]
@@ -353,19 +364,40 @@ if incl_ht:
     # Have 3 different options for heat treatment kernels
     if ht_kernel_type == "poly":
         my_kernel = poly_kernel.setup(0.1,0.1,comp_dim,ht_dim)
+        if standardise_ht:
+            s = np.std(X_ms[:,:2*ht_dim],axis=0)
+            my_kernel.add_ht_scaling(s)
     elif ht_kernel_type == "rbf":
         if comp_kernel_type == "rbf":
             my_kernel = multi_rbf_kernel.setup(0.1,comp_dim,ht_dim)
         else:
             my_kernel = multi_kernel.setup(0.1,comp_dim,ht_dim)
+        if standardise_ht:
+            s = np.std(X_ms[:,:2*ht_dim],axis=0)
+            my_kernel.add_ht_scaling(s)
     else:
         my_kernel = unordered_kernel.setup(0.1,comp_dim,ht_dim)
+        if standardise_ht:
+            s = np.std(X_ms[:,:ht_dim]*X_ms[:,ht_dim:2*ht_dim],axis=0)
+            my_kernel.add_ht_scaling(s)
+    # Add scaling for composition
+    if standardise_comp:
+        s = np.std(np.r_[np.identity(comp_dim),np.ones((1,comp_dim))] @ X_ms[:,-comp_dim:].T,axis=1)
+        my_kernel.add_comp_scaling(s)
+    
 else:
+    # Learn part. coeffs. from composition only.
     # Have 2 different options for kernels.
     if comp_kernel_type == "special":
         my_kernel = special_kernel.setup(0.1,comp_dim) # 9 is dimensionality of composition data.
     else: 
         my_kernel = rbf_kernel.setup(0.1,comp_dim)
+    # Add scaling as needed.
+    if standardise_comp:
+        s = np.std(np.r_[np.identity(comp_dim),np.ones((1,comp_dim))] @ X_ms.T,axis=1)
+        my_kernel.add_comp_scaling(s)
+        
+################################ KRR SUBROUTINE ###############################
 
 # inner-most function of the main procedure, trains a krr model for a given property...
 # ... for an entire cohort so that this can be used in a minimization function to optimise...
@@ -674,11 +706,20 @@ if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
     v = 2 # verbosity of output
     if ht_kernel_type == "poly":
-        kernel_params_init = np.array([0.1,1.e-6])
+        kernel_params_init = np.array([1.e-2,1.e-3])
     else:
-        kernel_params_init = np.array([0.1])
-    eps = 5.e-4*kernel_params_init
+        kernel_params_init = np.array([1.e-2])
+    # Carry out a preliminary search of the parameters. 
+    if prelim_search:
+        print("\nStarting initial grid search for kernel parameters...\n")
+        for kernel_params in product(*list(np.array([(10**m)*kernel_params_init for m in range(-2,3)]).T)):
+            new_error = calc_microstruc_error(kernel_params,v=v)
+            if new_error == best_error:
+                kernel_params_init = np.array(kernel_params)
+        print("\n---------------------------------------------------\nGrid search complete.\n---------------------------------------------------\n")
+    eps = 5.e-2*kernel_params_init
     bounds = kernel_params_init.shape[0]*[(0.,None)]
+    print("\nStarting LBFGS optimisation of kernel parameters...\n")
     result = minimize(calc_microstruc_error,
                       kernel_params_init,
                       args=(v,),
