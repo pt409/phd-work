@@ -43,6 +43,7 @@ database = config[config_type].get("database")
 test_frac = config[config_type].getfloat("test_pc")/100.0
 seed = config[config_type].getint("seed")
 error_weight = config[config_type].getfloat("error_weight")
+constr_weight = config[config_type].getfloat("constr_weight")
 standardise_ht = config[config_type].getboolean("standardise_ht")
 standardise_comp = config[config_type].getboolean("standardise_comp")
 prelim_search = config[config_type].getboolean("prelim_search")
@@ -425,7 +426,8 @@ def train_cohort_model(alpha_j,X,y,return_model=False):
 
 # Initial error calculations:
 # can calculate an error if mean compositions were used here.
-mu = 1.*error_weight # Weighting of overall precipitate fraction in the score.
+mu  = 1.*error_weight # Weighting of precipitate fraction error in the overall error.
+mu2 = 1.*constr_weight # Weighting of soft constraint on part coeff scores in the error.
 frac_error_0 = 0.5*((f - f.mean())**2).mean(axis=0)
 phase_error_0 = (((f*x_prc_target - f.mean()*x_prc_target.mean(axis=0))**2).sum(axis=1,keepdims=True)).mean(axis=0)
 error_0 = mu*frac_error_0 + phase_error_0
@@ -454,6 +456,8 @@ def calc_microstruc_error(kernel_params,v=1):
     lambda_output = "lambda =\t"
     score_output =  "R^2    =\t"
     cv_output =  "CV err =\t"
+    # A term that involves the sign of the R^2 scores and is added to the overall error as a soft constraint
+    err_soft_cnstr = 0
     for ms_prop, ms_data in ml_data_dict.items():
         if v>=2: print("{} part. coeff. ...".format(ms_prop))
         result = minimize(train_cohort_model,
@@ -461,20 +465,22 @@ def calc_microstruc_error(kernel_params,v=1):
                           args=ms_data,
                           method="L-BFGS-B",
                           bounds=[(1.e-8,None)],
-                          options={"ftol":5.e-3,
-                                   "gtol":3.e-3,
-                                   "eps":5.e-4})
+                          options={"ftol":1.e-3,
+                                   "gtol":1.e-3,
+                                   "eps":0.005})
         opt_alpha = result.x
         #next_alpha[ms_prop] = opt_alpha
         krr_model = train_cohort_model(opt_alpha,*ms_data,return_model=True)
         models[ms_prop] = krr_model
+        part_coeff_score = krr_model.score(*ms_data)
+        err_soft_cnstr += np.heaviside(-part_coeff_score,1.0)
         if v >= 2:
             lambda_output += "{:.5e}\t".format(result.x[0])
             try: 
                 cv_output += "{:.5e}\t".format(result.fun)
             except TypeError:
                 return result
-            score_output += "{:.5f}   \t".format(krr_model.score(*ms_data))
+            score_output += "{:.5f}   \t".format(part_coeff_score)
     if v >= 1: print("Done!\n")
     if v >= 2:
         print(output_head)
@@ -496,7 +502,7 @@ def calc_microstruc_error(kernel_params,v=1):
     #phase_error = (((f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)
     # new version:
     phase_error = (((f_pred*x_prc - f*x_prc_target)**2).sum(axis=1,keepdims=True)).mean(axis=0)    
-    error = mu*frac_error + phase_error
+    error = mu*frac_error + phase_error + mu2*err_soft_cnstr
     score = 1.0 - error/error_0
     if v >= 2:
         frac_score = 1.0 - frac_error/frac_error_0
@@ -703,9 +709,9 @@ if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
     v = 2 # verbosity of output
     if ht_kernel_type == "poly":
-        kernel_params_init = np.array([1.e-1,1.e-3])
+        kernel_params_init = np.array([1.,1.e-3])
     else:
-        kernel_params_init = np.array([1.e-1])
+        kernel_params_init = np.array([1.])
     # Carry out a preliminary search of the parameters. 
     if prelim_search:
         print("\nStarting initial grid search for kernel parameters...\n")
@@ -715,7 +721,7 @@ if __name__ == '__main__':
             if new_error == best_error:
                 kernel_params_init = copy(kernel_params)
         print("\n---------------------------------------------------\nGrid search complete.\n---------------------------------------------------\n")
-    eps = 1.e-4*kernel_params_init
+    eps = 1.e-1*kernel_params_init
     bounds = kernel_params_init.shape[0]*[(0.,None)]
     print("\nStarting LBFGS optimisation of kernel parameters...\n")
     result = minimize(calc_microstruc_error,
@@ -723,8 +729,8 @@ if __name__ == '__main__':
                       args=(v,),
                       method="L-BFGS-B",
                       bounds=bounds,
-                      options={"ftol":1.e-3,
-                               "gtol":1.e-3,
+                      options={"ftol":5.e-4,
+                               "gtol":5.e-4,
                                "eps":eps})
     # Pickle the optimised models that were found.
     print("\n\n++++++++++++++ OPTIMISATION COMPLETE ++++++++++++++")  
