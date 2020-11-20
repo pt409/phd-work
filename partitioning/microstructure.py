@@ -367,7 +367,7 @@ if incl_ht:
     if ht_kernel_type == "poly":
         my_kernel = poly_kernel.setup(0.1,0.1,comp_dim,ht_dim)
         if standardise_ht:
-            s = np.std(X_ms[:,:2*ht_dim],axis=0)
+            s = 4*np.std(X_ms[:,:2*ht_dim],axis=0)
             my_kernel.add_ht_scaling(s)
     elif ht_kernel_type == "rbf":
         if comp_kernel_type == "rbf":
@@ -375,16 +375,16 @@ if incl_ht:
         else:
             my_kernel = multi_kernel.setup(0.1,comp_dim,ht_dim)
         if standardise_ht:
-            s = np.std(X_ms[:,:2*ht_dim],axis=0)
+            s = 4*np.std(X_ms[:,:2*ht_dim],axis=0)
             my_kernel.add_ht_scaling(s)
     else:
         my_kernel = unordered_kernel.setup(0.1,comp_dim,ht_dim)
         if standardise_ht:
-            s = np.std(X_ms[:,:ht_dim]*X_ms[:,ht_dim:2*ht_dim],axis=0)
+            s = 4*np.std(X_ms[:,:ht_dim]*X_ms[:,ht_dim:2*ht_dim],axis=0)
             my_kernel.add_ht_scaling(s)
     # Add scaling for composition
     if standardise_comp:
-        s = np.std(np.r_[np.identity(comp_dim),np.ones((1,comp_dim))] @ X_ms[:,-comp_dim:].T,axis=1)
+        s = 4*np.std(np.r_[np.identity(comp_dim),np.ones((1,comp_dim))] @ X_ms[:,-comp_dim:].T,axis=1)
         my_kernel.add_comp_scaling(s)
     
 else:
@@ -396,7 +396,7 @@ else:
         my_kernel = rbf_kernel.setup(0.1,comp_dim)
     # Add scaling as needed.
     if standardise_comp:
-        s = np.std(np.r_[np.identity(comp_dim),np.ones((1,comp_dim))] @ X_ms.T,axis=1)
+        s = 4*np.std(np.r_[np.identity(comp_dim),np.ones((1,comp_dim))] @ X_ms.T,axis=1)
         my_kernel.add_comp_scaling(s)
         
 ################################ KRR SUBROUTINE ###############################
