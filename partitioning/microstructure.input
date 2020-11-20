@@ -9,6 +9,7 @@ test_pc = 13.0
 seed = 2106
 error_weight = 1.0
 constr_weight = 0.1
+gamma = 1.0
 standardise_ht = true
 standardise_comp = false
 prelim_search = true

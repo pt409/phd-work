@@ -26,7 +26,7 @@ import sys
 
 # Some options.
 # Uses a configparser file (.ini structure).
-config_default = "rbf_test"
+config_default = "rbf_ht_kernel"
 config = configparser.ConfigParser()
 config.read("microstructure.input")
 if len(sys.argv) > 1:
@@ -47,6 +47,7 @@ constr_weight = config[config_type].getfloat("constr_weight")
 standardise_ht = config[config_type].getboolean("standardise_ht")
 standardise_comp = config[config_type].getboolean("standardise_comp")
 prelim_search = config[config_type].getboolean("prelim_search")
+gamma_0 = config[config_type].getfloat("gamma")
 
 ############################### DATA PROCESSING ###############################
 
@@ -709,9 +710,9 @@ if __name__ == '__main__':
     # Now minimise the microstructural error over the kernel parameters.
     v = 2 # verbosity of output
     if ht_kernel_type == "poly":
-        kernel_params_init = np.array([1.,1.e-3])
+        kernel_params_init = np.array([gamma_0,1.e-3])
     else:
-        kernel_params_init = np.array([1.])
+        kernel_params_init = np.array([gamma_0])
     # Carry out a preliminary search of the parameters. 
     if prelim_search:
         print("\nStarting initial grid search for kernel parameters...\n")
