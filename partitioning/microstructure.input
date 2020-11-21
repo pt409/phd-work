@@ -13,6 +13,8 @@ gamma = 1.0
 standardise_ht = true
 standardise_comp = false
 prelim_search = true
+n_fold_testing = false
+n_folds = 1
 
 [rbf_test]
 incl_ht = false
@@ -40,3 +42,27 @@ output_models = kernel_tests/physical_ht_kernel_model.pkl
 [poly_ht_kernel]
 ht_kernel_type = poly
 output_models = kernel_tests/poly_ht_model.pkl
+
+[ht_spc_part_scaling]
+n_fold_testing = true
+n_folds = 6
+output_models = kernel_tests/publishable/ht_spc_part_scaling.pkl
+
+[ht_spc_full_scaling]
+n_fold_testing = true
+n_folds = 6
+standardise_comp = true
+output_models = kernel_tests/publishable/ht_spc_full_scaling.pkl
+
+[ht_gss_part_scaling]
+n_fold_testing = true
+n_folds = 6
+comp_kernel_type = rbf
+output_models = kernel_tests/publishable/ht_gss_part_scaling.pkl
+
+[ht_gss_full_scaling]
+n_fold_testing = true
+n_folds = 6
+comp_kernel_type = rbf
+standardise_comp = true
+output_models = kernel_tests/publishable/ht_gss_full_scaling.pkl
