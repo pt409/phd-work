@@ -44,23 +44,31 @@ ht_kernel_type = poly
 output_models = kernel_tests/poly_ht_model.pkl
 
 [ht_spc_part_scaling]
+seed = 1934
+gamma = 0.01
 n_fold_testing = true
 n_folds = 6
 output_models = kernel_tests/publishable/ht_spc_part_scaling.pkl
 
 [ht_spc_full_scaling]
+seed = 1934
+gamma = 0.01
 n_fold_testing = true
 n_folds = 6
 standardise_comp = true
 output_models = kernel_tests/publishable/ht_spc_full_scaling.pkl
 
 [ht_gss_part_scaling]
+seed = 1934
+gamma = 0.01
 n_fold_testing = true
 n_folds = 6
 comp_kernel_type = rbf
 output_models = kernel_tests/publishable/ht_gss_part_scaling.pkl
 
 [ht_gss_full_scaling]
+seed = 1934
+gamma = 0.01
 n_fold_testing = true
 n_folds = 6
 comp_kernel_type = rbf

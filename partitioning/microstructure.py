@@ -463,17 +463,26 @@ def newtonRaphson_bounded(g,g_deriv,f0,f_tol,alpha=1.0,x0=0.5):
 def root_finder(g,g_deriv,g_deriv2,f_tol,f_scale,N_iter=100):
     # Coarse method to find 1st turning point before f=1.0
     f = 1.0
+    gd_0 = g_deriv(f)
     while f>0.0:
-        gd_0 = g_deriv(f)
         f -= f_scale
         gd_1 = g_deriv(f)
-        if gd_0*gd_1 <= 0: # check for sign change
+        if gd_0*gd_1 <= 0.0: # check for sign change
+            gdd_0 = g_deriv2(f+f_scale)
             break
+        gd_0 = copy(gd_1)
+    # Now search for change in 2nd derivative too
+    while f>0.0:
+        gdd_1 = g_deriv2(f)
+        if gdd_0*gdd_1 <= 0.0:
+            break
+        f -= f_scale
+        gdd_0 = copy(gdd_1)
     f_sol = halley(g,g_deriv,g_deriv2,f,f_tol,N_iter=N_iter)
     return f_sol
 
 def calc_prc_frac(x_comp,part_coeffs,f_tol,
-                  f_scale=0.01,trace_tol=0.002,N_iter=100,
+                  f_scale=0.005,trace_tol=0.002,N_iter=100,
                   robust=True):
     # Neglect elements with fraction less than trace_tol
     # f_scale, N_iter options get passed to root_finder
@@ -728,7 +737,7 @@ for fold_i in range(n_folds):
         # Carry out a preliminary search of the parameters. 
         if prelim_search:
             print("\nStarting initial grid search for kernel parameters...\n")
-            for kernel_params in product(*list(np.array([(10**m)*kernel_params_init for m in range(-3,4)]).T)):
+            for kernel_params in product(*list(np.array([(10**m)*kernel_params_init for m in range(-1,2)]).T)):
                 kernel_params = np.array(kernel_params)
                 new_error = calc_microstruc_error(kernel_params,v=v)
                 if new_error == best_error:
@@ -742,8 +751,8 @@ for fold_i in range(n_folds):
                           args=(v,),
                           method="L-BFGS-B",
                           bounds=bounds,
-                          options={"ftol":5.e-4,
-                                   "gtol":5.e-4,
+                          options={"ftol":1.e-3,
+                                   "gtol":1.e-3,
                                    "eps":eps})
         # Pickle the optimised models that were found.
         print("\n\n++++++++++++++ OPTIMISATION COMPLETE ++++++++++++++")  
