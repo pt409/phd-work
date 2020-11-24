@@ -74,3 +74,11 @@ n_folds = 6
 comp_kernel_type = rbf
 standardise_comp = true
 output_models = kernel_tests/publishable/ht_gss_full_scaling.pkl
+
+[ht_gss_full_scaling_final]
+prelim_search = false
+gamma = 0.1
+test_pc = 0.0
+comp_kernel_type = rbf
+standardise_comp = true
+output_models = kernel_tests/publishable/ht_gss_full_scaling_final.pkl
