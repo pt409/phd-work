@@ -82,3 +82,8 @@ test_pc = 0.0
 comp_kernel_type = rbf
 standardise_comp = true
 output_models = kernel_tests/publishable/ht_gss_full_scaling_final.pkl
+
+[ht_spc_part_scaling_final]
+gamma = 0.01
+test_pc = 0.0
+output_models = kernel_tests/publishable/ht_spc_part_scaling_final.pkl
