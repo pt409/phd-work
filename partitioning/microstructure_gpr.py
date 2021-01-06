@@ -8,19 +8,19 @@ Created on Mon Jun  1 15:44:29 2020
 
 import numpy as np
 import pandas as pd
-import pickle
+#import pickle
 
 #from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
 from sklearn.metrics import r2_score # mean_squared_error
 
 import sklearn.gaussian_process as gp
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.preprocessing import StandardScaler
+#from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, cdist, squareform
 
-from itertools import product
+#from itertools import product
 
-from copy import deepcopy,copy
+#from copy import deepcopy,copy
 
 import configparser
 import sys
@@ -138,7 +138,7 @@ class PartScaler():
     def __init__(self, scale_range=None, copy_=True,with_mean=True,with_std=True):
         self.with_mean = with_mean
         self.with_std = with_std
-        self.copy_ = copy
+        self.copy_ = copy_
         self.range_ = scale_range
         
     def _reset(self):
@@ -201,19 +201,19 @@ class L2RBF(gp.kernels.RBF):
         self.constr_trans()
         
     def constr_trans(self):
-        Imod = np.eye(self.dims)
+        A = np.eye(self.dims)
         if self.dim_range: 
-            Imod = Imod[self.dim_range[0]:self.dim_range[1],:]
+            A = A[self.dim_range[0]:self.dim_range[1],:]
         if self.comp: 
-            Imod = np.r_[Imod,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
-        Imod = Imod.T # Use transpose since vectors are represented by rows not columns.
-        self.Imod = Imod
+            A = np.r_[A,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
+        A = A.T # Use transpose since vectors are represented by rows not columns.
+        self.A = A
         
     def __call__(self, X, Y=None, eval_gradient=False):
         X = np.atleast_2d(X)
-        length_scale = gp.kernels._check_length_scale(X@self.Imod, self.length_scale)
+        length_scale = gp.kernels._check_length_scale(X@self.A, self.length_scale)
         if Y is None:
-            dists = pdist(X@self.Imod / length_scale, metric='sqeuclidean')
+            dists = pdist(X@self.A / length_scale, metric='sqeuclidean')
             K = np.exp(-.5 * dists)
             # convert from upper-triangular matrix to square matrix
             K = squareform(K)
@@ -222,21 +222,21 @@ class L2RBF(gp.kernels.RBF):
             if eval_gradient:
                 raise ValueError(
                     "Gradient can only be evaluated when Y is None.")
-            dists = cdist(X@self.Imod / length_scale, Y@self.Imod / length_scale,
+            dists = cdist(X@self.A / length_scale, Y@self.A / length_scale,
                           metric='sqeuclidean')
             K = np.exp(-.5 * dists)
 
         if eval_gradient:
             if self.hyperparameter_length_scale.fixed:
                 # Hyperparameter l kept fixed
-                return K, np.empty(((X@self.Imod).shape[0], (X@self.Imod).shape[0], 0))
+                return K, np.empty(((X@self.A).shape[0], (X@self.A).shape[0], 0))
             elif not self.anisotropic or length_scale.shape[0] == 1:
                 K_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
-                K_gradient = ((X@self.Imod)[:, np.newaxis, :] - (X@self.Imod)[np.newaxis, :, :])**2 \
+                K_gradient = ((X@self.A)[:, np.newaxis, :] - (X@self.A)[np.newaxis, :, :])**2 \
                     / length_scale
                 K_gradient *= K[..., np.newaxis]
                 return K, K_gradient
@@ -263,9 +263,9 @@ class L1RBF(L2RBF):
                 
     def __call__(self, X, Y=None, eval_gradient=False):
         X = np.atleast_2d(X)
-        length_scale = gp.kernels._check_length_scale(X@self.Imod, self.length_scale)
+        length_scale = gp.kernels._check_length_scale(X@self.A, self.length_scale)
         if Y is None:
-            dists = pdist(X@self.Imod / length_scale, metric='cityblock')
+            dists = pdist(X@self.A / length_scale, metric='cityblock')
             K = np.exp(-1. * dists)
             # convert from upper-triangular matrix to square matrix
             K = squareform(K)
@@ -274,21 +274,21 @@ class L1RBF(L2RBF):
             if eval_gradient:
                 raise ValueError(
                     "Gradient can only be evaluated when Y is None.")
-            dists = cdist(X@self.Imod / length_scale, Y@self.Imod / length_scale,
+            dists = cdist(X@self.A / length_scale, Y@self.A / length_scale,
                           metric='cityblock')
             K = np.exp(-1. * dists)
 
         if eval_gradient:
             if self.hyperparameter_length_scale.fixed:
                 # Hyperparameter l kept fixed
-                return K, np.empty(((X@self.Imod).shape[0], (X@self.Imod).shape[0], 0))
+                return K, np.empty(((X@self.A).shape[0], (X@self.A).shape[0], 0))
             elif not self.anisotropic or length_scale.shape[0] == 1:
                 K_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
-                K_gradient = np.abs((X@self.Imod)[:, np.newaxis, :] - (X@self.Imod)[np.newaxis, :, :]) \
+                K_gradient = np.abs((X@self.A)[:, np.newaxis, :] - (X@self.A)[np.newaxis, :, :]) \
                     / length_scale
                 K_gradient *= K[..., np.newaxis]
                 return K, K_gradient
@@ -315,6 +315,8 @@ class physRBF(gp.kernels.RBF):
         
         
     def __call__(self, X, Y=None, eval_gradient=False):
+        # Convert input vector to representation of physical HT part.
+        X = np.einsum("li,lj,ijk->lk",X,X,self.M)
         X = np.atleast_2d(X)
         length_scale = gp.kernels._check_length_scale(X, self.length_scale)
         if Y is None:
@@ -327,6 +329,8 @@ class physRBF(gp.kernels.RBF):
             if eval_gradient:
                 raise ValueError(
                     "Gradient can only be evaluated when Y is None.")
+            # COnvert 2nd input vector to representation of physical HT part.
+            Y = np.einsum("li,lj,ijk->lk",Y,Y,self.M)
             dists = cdist(X / length_scale, Y / length_scale,
                           metric='sqeuclidean')
             K = np.exp(-.5 * dists)
@@ -347,7 +351,76 @@ class physRBF(gp.kernels.RBF):
                 return K, K_gradient
         else:
             return K
-            
+        
+# RBF classes with projection of composition onto a smaller subspace
+class subspace_L2RBF(L2RBF):
+    def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
+                 groups=np.ones([15,1]),
+                 dims=15,dim_range=None,comp=True):
+        super(subspace_L2RBF,self).__init__(length_scale,length_scale_bounds,
+                 dims,dim_range,comp)
+        self.groups = groups
+        
+    def constr_trans(self):
+        # Same part of transformation as above (convert to composition)
+        Ilike = np.eye(self.dims)
+        if self.dim_range: 
+            Ilike = Ilike[self.dim_range[0]:self.dim_range[1],:]
+        if self.comp: 
+            Ilike = np.r_[Ilike,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
+        # Subspace projection part of matrix
+        A = np.zeros([len(groups),len(sum(groups,[]))])
+        for row,group in enumerate(self.groups):
+            A[row][group] = 1. 
+        self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
+        
+    def __repr__(self):
+        if self.anisotropic:
+            return "{0}(length_scale=[{1}], nu={2:.3g})".format(
+                self.__class__.__name__,
+                ", ".join(map("{0:.3g}".format, self.length_scale)),
+                self.groups,
+                self.dims,self.dim_range,self.comp)
+        else:
+            return "{0}(length_scale={1:.3g}, nu={2:.3g})".format(
+                self.__class__.__name__, np.ravel(self.length_scale)[0],
+                self.groups,
+                self.dims,self.dim_range,self.comp)
+    
+class subspace_L1RBF(L1RBF):
+    def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
+                 groups=np.ones([15,1]),
+                 dims=15,dim_range=None,comp=True):
+        super(subspace_L2RBF,self).__init__(length_scale,length_scale_bounds,
+                 dims,dim_range,comp)
+        self.groups = groups
+        
+    def constr_trans(self):
+        # Same part of transformation as above (convert to composition)
+        Ilike = np.eye(self.dims)
+        if self.dim_range: 
+            Ilike = Ilike[self.dim_range[0]:self.dim_range[1],:]
+        if self.comp: 
+            Ilike = np.r_[Ilike,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
+        # Subspace projection part of matrix
+        A = np.zeros([len(groups),len(sum(groups,[]))])
+        for row,group in enumerate(self.groups):
+            A[row][group] = 1. 
+        self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
+        
+    def __repr__(self):
+        if self.anisotropic:
+            return "{0}(length_scale=[{1}], nu={2:.3g})".format(
+                self.__class__.__name__,
+                ", ".join(map("{0:.3g}".format, self.length_scale)),
+                self.groups,
+                self.dims,self.dim_range,self.comp)
+        else:
+            return "{0}(length_scale={1:.3g}, nu={2:.3g})".format(
+                self.__class__.__name__, np.ravel(self.length_scale)[0],
+                self.groups,
+                self.dims,self.dim_range,self.comp)
+    
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Process database in order to get all the microstructural data.
@@ -359,6 +432,9 @@ f_best_kfolds = np.array([])
 f_errs_kfolds = np.array([])
 best_models_kfolds = np.array([])
 f_all_kfolds = np.empty([11,0])
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% K-FOLDS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 for fold_i in range(n_folds):
     if n_fold_testing:
         N_test = N//n_folds
@@ -417,17 +493,17 @@ for fold_i in range(n_folds):
         scaler = PartScaler(ht_range,with_mean=False)
         X = scaler.fit_transform(X)
         sub_models = {}
+        # Setup kernel here.
+        #kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
+        kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) \
+            * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
+                * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
         for a,part_coeff_type in enumerate(["1/2","nom/2"]):
-            # Setup kernel here.
-            #kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
-            kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) \
-                * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
-                    * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
             gpr = GaussianProcessRegressor(kernel=kernel,
                                            normalize_y=True,
                                            random_state=seed,
                                            alpha=0.01,
-                                           n_restarts_optimizer=3)
+                                           n_restarts_optimizer=2)
             gpr.fit(X,ml_data_dict[el][1][:,a])
             sub_models[part_coeff_type] = gpr
         models[el] = sub_models
@@ -437,15 +513,11 @@ for fold_i in range(n_folds):
     scaler = PartScaler(ht_range,with_mean=False)
     X = scaler.fit_transform(X)
     f_fit = np.log(0.01*f_data[1])
-    #kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
-    kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) \
-        * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
-                    * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
     gpr = GaussianProcessRegressor(kernel=kernel,
                                    normalize_y=True,
                                    random_state=seed,
                                    alpha=0.01,
-                                   n_restarts_optimizer=3)
+                                   n_restarts_optimizer=2)
     gpr.fit(X,f_fit)
     models["f"] = gpr
     scalers["f"] = scaler
