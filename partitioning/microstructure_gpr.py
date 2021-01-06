@@ -36,20 +36,15 @@ if len(sys.argv) > 1:
         config_type = sys.argv[1]
     else: config_type = config_default
 else: config_type = config_default
-incl_ht = config[config_type].getboolean("incl_ht")
-learn_log_Ki = config[config_type].getboolean("learn_log_Ki")
+incl_ht = True # Always include ht in this version of the code.
 comp_kernel_type = config[config_type].get("comp_kernel_type")
 ht_kernel_type = config[config_type].get("ht_kernel_type")
 opt_models_pkl_0 = config[config_type].get("output_models")
 database = config[config_type].get("database")
 test_frac = config[config_type].getfloat("test_pc")/100.0
 seed = config[config_type].getint("seed")
-error_weight = config[config_type].getfloat("error_weight")
-constr_weight = config[config_type].getfloat("constr_weight")
 standardise_ht = config[config_type].getboolean("standardise_ht")
 standardise_comp = config[config_type].getboolean("standardise_comp")
-prelim_search = config[config_type].getboolean("prelim_search")
-gamma_0 = config[config_type].getfloat("gamma")
 n_fold_testing = config[config_type].getboolean("n_fold_testing")
 n_folds = config[config_type].getint("n_folds")
 
@@ -504,8 +499,13 @@ for fold_i in range(n_folds):
     # Learn partitioning coefficients models for each element and part. coeff.
     for el in elements:
         X = ml_data_dict[el][0]
-        scaler = PartScaler(ht_range,with_mean=False)
-        X = scaler.fit_transform(X)
+        if standardise_ht and standardise_comp:
+            scaler = PartScaler(with_mean=False)
+        elif standardise_ht:
+            scaler = PartScaler(ht_range,with_mean=False)
+        elif standardise_comp:
+            scaler = PartScaler(comp_range,with_mean=False)
+            X = scaler.fit_transform(X)
         sub_models = {}
         groups = [[0,1,2],[3,4,7,9],[5,6,8]] # Grouping of elements in subspace projection
         # Setup kernel here.
@@ -528,11 +528,17 @@ for fold_i in range(n_folds):
             gpr.fit(X,ml_data_dict[el][1][:,a])
             sub_models[part_coeff_type] = gpr
         models[el] = sub_models
-        scalers[el] = scaler
+        if standardise_ht or standardise_comp:
+            scalers[el] = scaler
     # Repeat for precipitate fraction
     X = f_data[0]
-    scaler = PartScaler(ht_range,with_mean=False)
-    X = scaler.fit_transform(X)
+    if standardise_ht and standardise_comp:
+        scaler = PartScaler(with_mean=False)
+    elif standardise_ht:
+        scaler = PartScaler(ht_range,with_mean=False)
+    elif standardise_comp:
+        scaler = PartScaler(comp_range,with_mean=False)
+        X = scaler.fit_transform(X)
     f_fit = np.log(0.01*f_data[1])
     gpr = GaussianProcessRegressor(kernel=kernel,
                                    normalize_y=True,
@@ -541,14 +547,18 @@ for fold_i in range(n_folds):
                                    n_restarts_optimizer=2)
     gpr.fit(X,f_fit)
     models["f"] = gpr
-    scalers["f"] = scaler
+    if standardise_ht or standardise_comp:
+        scalers["f"] = scaler
     
     # Work out fractions for test data set.
     f_all = []
     f_err_all = []
     # Uncertainties for fractions calculated from part. coeffs.
     for el in elements:
-        X = scalers[el].transform(X_ms_t)
+        if standardise_ht or standardise_comp:
+            X = scalers[el].transform(X_ms_t)
+        else:
+            X = X_ms_t.copy()
         K1,K_err1 = models[el]["1/2"].predict(X,return_std=True)
         K2,K_err2 = models[el]["nom/2"].predict(X,return_std=True)
         f_ = (np.exp(K2)-np.exp(K1))/(1-np.exp(K1))
@@ -556,7 +566,10 @@ for fold_i in range(n_folds):
         f_all += [f_]
         f_err_all += [f_err]
     # Uncertainty for fraction calculated directly.
-    X = scalers["f"].transform(X_ms_t)
+    if standardise_ht or standardise_comp:
+        X = scalers["f"].transform(X_ms_t)
+    else:
+        X = X_ms_t.copy()
     f_d,f_err_d = models["f"].predict(X,return_std=True)
     # Have model of log(f) - convert to f
     f_d = np.exp(f_d)
