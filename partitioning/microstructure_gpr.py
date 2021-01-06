@@ -15,6 +15,7 @@ from sklearn.metrics import r2_score # mean_squared_error
 
 import sklearn.gaussian_process as gp
 from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import ConstantKernel
 #from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, cdist, squareform
 
@@ -298,17 +299,19 @@ class L1RBF(L2RBF):
 # "Physical" kernel for the heat treatment part of feature vector.
 class physRBF(gp.kernels.RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
-                 dims=15,dim_range=None,comp=True):
+                 dims=15,dim_range=None):
         super(physRBF,self).__init__(length_scale,length_scale_bounds)
+        self.dims = dims
+        self.dim_range = dim_range
         # Matrix used to transform vectors in call.
-        if dim_range: 
-            ht_dims = dim_range[1]-dim_range[0]
-        else: ht_dims = dims
-        if dims%2 != 0:
+        if self.dim_range: 
+            ht_dims = self.dim_range[1]-self.dim_range[0]
+        else: ht_dims = self.dims
+        if ht_dims%2 != 0:
             raise ValueError(
                 "Need an even number of dimensions")
         else: ht_dims //=2
-        self.M = np.zeros((dims,dims,ht_dims))
+        self.M = np.zeros((self.dims,self.dims,ht_dims))
         for k in range(ht_dims):
             self.M[k,k+ht_dims,k] = 0.5
             self.M[k+ht_dims,k,k] = 0.5
@@ -352,14 +355,25 @@ class physRBF(gp.kernels.RBF):
         else:
             return K
         
+    def __repr__(self):
+        if self.anisotropic:
+            return "{0}(length_scale=[{1}], nu={2:.3g})".format(
+                self.__class__.__name__,
+                ", ".join(map("{0:.3g}".format, self.length_scale)),
+                self.dims,self.dim_range)
+        else:
+            return "{0}(length_scale={1:.3g}, nu={2:.3g})".format(
+                self.__class__.__name__, np.ravel(self.length_scale)[0],
+                self.dims,self.dim_range)
+        
 # RBF classes with projection of composition onto a smaller subspace
 class subspace_L2RBF(L2RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
                  groups=np.ones([15,1]),
                  dims=15,dim_range=None,comp=True):
+        self.groups = groups
         super(subspace_L2RBF,self).__init__(length_scale,length_scale_bounds,
                  dims,dim_range,comp)
-        self.groups = groups
         
     def constr_trans(self):
         # Same part of transformation as above (convert to composition)
@@ -369,7 +383,7 @@ class subspace_L2RBF(L2RBF):
         if self.comp: 
             Ilike = np.r_[Ilike,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
         # Subspace projection part of matrix
-        A = np.zeros([len(groups),len(sum(groups,[]))])
+        A = np.zeros([len(self.groups),len(sum(self.groups,[]))])
         for row,group in enumerate(self.groups):
             A[row][group] = 1. 
         self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
@@ -391,9 +405,9 @@ class subspace_L1RBF(L1RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
                  groups=np.ones([15,1]),
                  dims=15,dim_range=None,comp=True):
-        super(subspace_L2RBF,self).__init__(length_scale,length_scale_bounds,
-                 dims,dim_range,comp)
         self.groups = groups
+        super(subspace_L1RBF,self).__init__(length_scale,length_scale_bounds,
+                 dims,dim_range,comp)
         
     def constr_trans(self):
         # Same part of transformation as above (convert to composition)
@@ -403,7 +417,7 @@ class subspace_L1RBF(L1RBF):
         if self.comp: 
             Ilike = np.r_[Ilike,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
         # Subspace projection part of matrix
-        A = np.zeros([len(groups),len(sum(groups,[]))])
+        A = np.zeros([len(self.groups),len(sum(self.groups,[]))])
         for row,group in enumerate(self.groups):
             A[row][group] = 1. 
         self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
@@ -493,11 +507,18 @@ for fold_i in range(n_folds):
         scaler = PartScaler(ht_range,with_mean=False)
         X = scaler.fit_transform(X)
         sub_models = {}
+        groups = [[0,1,2],[3,4,7,9],[5,6,8]] # Grouping of elements in subspace projection
         # Setup kernel here.
-        #kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
-        kernel = gp.kernels.ConstantKernel(1.0,(1.e-3,1.e3)) \
-            * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
-                * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
+        #kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
+        #kernel = ConstantKernel(1.0,(1.e-3,1.e3)) \
+        #    * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
+        #        * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
+        kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * \
+            (subspace_L1RBF(0.1,(1.e-4,1.e3),groups=groups,dim_range=comp_range,comp=True) + \
+             ConstantKernel(0.01,(1.e-5,1.e-1)) * \
+                 L1RBF(0.1,(1.e-4,1e3),dim_range=comp_range,comp=True) + \
+                     ConstantKernel(0.01,(1.e-5,1.e-1)) * \
+                         physRBF(1.e-4,(1.e-7,1.e-1),dims=15,dim_range=ht_range))
         for a,part_coeff_type in enumerate(["1/2","nom/2"]):
             gpr = GaussianProcessRegressor(kernel=kernel,
                                            normalize_y=True,
