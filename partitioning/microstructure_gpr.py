@@ -11,7 +11,8 @@ import pandas as pd
 #import pickle
 
 #from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
-from sklearn.metrics import r2_score # mean_squared_error
+from sklearn.metrics import r2_score
+from scipy.stats import pearsonr
 
 import sklearn.gaussian_process as gp
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -238,17 +239,6 @@ class L2RBF(gp.kernels.RBF):
                 return K, K_gradient
         else:
             return K
-        
-    def __repr__(self):
-        if self.anisotropic:
-            return "{0}(length_scale=[{1}], nu={2:.3g})".format(
-                self.__class__.__name__,
-                ", ".join(map("{0:.3g}".format, self.length_scale)),
-                self.dims,self.dim_range,self.comp)
-        else:
-            return "{0}(length_scale={1:.3g}, nu={2:.3g})".format(
-                self.__class__.__name__, np.ravel(self.length_scale)[0],
-                self.dims,self.dim_range,self.comp)
 
 # Mainly borrowed from RBF class
 class L1RBF(L2RBF):
@@ -310,8 +300,7 @@ class physRBF(gp.kernels.RBF):
         for k in range(ht_dims):
             self.M[k,k+ht_dims,k] = 0.5
             self.M[k+ht_dims,k,k] = 0.5
-        
-        
+              
     def __call__(self, X, Y=None, eval_gradient=False):
         # Convert input vector to representation of physical HT part.
         X = np.einsum("li,lj,ijk->lk",X,X,self.M)
@@ -350,17 +339,6 @@ class physRBF(gp.kernels.RBF):
         else:
             return K
         
-    def __repr__(self):
-        if self.anisotropic:
-            return "{0}(length_scale=[{1}], nu={2:.3g})".format(
-                self.__class__.__name__,
-                ", ".join(map("{0:.3g}".format, self.length_scale)),
-                self.dims,self.dim_range)
-        else:
-            return "{0}(length_scale={1:.3g}, nu={2:.3g})".format(
-                self.__class__.__name__, np.ravel(self.length_scale)[0],
-                self.dims,self.dim_range)
-        
 # RBF classes with projection of composition onto a smaller subspace
 class subspace_L2RBF(L2RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
@@ -382,19 +360,6 @@ class subspace_L2RBF(L2RBF):
         for row,group in enumerate(self.groups):
             A[row][group] = 1. 
         self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
-        
-    def __repr__(self):
-        if self.anisotropic:
-            return "{0}(length_scale=[{1}], nu={2:.3g})".format(
-                self.__class__.__name__,
-                ", ".join(map("{0:.3g}".format, self.length_scale)),
-                self.groups,
-                self.dims,self.dim_range,self.comp)
-        else:
-            return "{0}(length_scale={1:.3g}, nu={2:.3g})".format(
-                self.__class__.__name__, np.ravel(self.length_scale)[0],
-                self.groups,
-                self.dims,self.dim_range,self.comp)
     
 class subspace_L1RBF(L1RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
@@ -416,20 +381,7 @@ class subspace_L1RBF(L1RBF):
         for row,group in enumerate(self.groups):
             A[row][group] = 1. 
         self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
-        
-    def __repr__(self):
-        if self.anisotropic:
-            return "{0}(length_scale=[{1}], nu={2:.3g})".format(
-                self.__class__.__name__,
-                ", ".join(map("{0:.3g}".format, self.length_scale)),
-                self.groups,
-                self.dims,self.dim_range,self.comp)
-        else:
-            return "{0}(length_scale={1:.3g}, nu={2:.3g})".format(
-                self.__class__.__name__, np.ravel(self.length_scale)[0],
-                self.groups,
-                self.dims,self.dim_range,self.comp)
-    
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Process database in order to get all the microstructural data.
@@ -523,7 +475,7 @@ for fold_i in range(n_folds):
             gpr = GaussianProcessRegressor(kernel=kernel,
                                            normalize_y=True,
                                            random_state=seed,
-                                           alpha=0.01,
+                                           alpha=0.07,
                                            n_restarts_optimizer=2)
             gpr.fit(X,ml_data_dict[el][1][:,a])
             sub_models[part_coeff_type] = gpr
@@ -595,9 +547,12 @@ for fold_i in range(n_folds):
     f_best_kfolds = np.append(f_best_kfolds,f_best)
     best_models_kfolds = np.append(best_models_kfolds,best_models)
     f_errs_kfolds = np.append(f_errs_kfolds,f_best_errs)
+# Some final output
+print("\n\n---------------------------------------------------\n")
 f_comm_t_kfolds = f_t_kfolds[(f_t_kfolds>=0.6) & (f_t_kfolds<=0.8)]
 f_comm_best_kfolds = f_best_kfolds[(f_t_kfolds>=0.6) & (f_t_kfolds<=0.8)]
 print("Overall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_t_kfolds,f_best_kfolds)))
 print("Overall R^2 score for commercial alloys only = {:5f}".format(r2_score(f_comm_t_kfolds,f_comm_best_kfolds)))
+print("Pearson's r for commercial alloys only = {:5f}".format(pearsonr(f_comm_t_kfolds,f_comm_best_kfolds)[0]))
 # Use to get colours for different models for each datapt, e.g. for plotting 
 model_colours = np.array(list(map({n:i for i,n in enumerate(set(best_models_kfolds))}.get,best_models_kfolds)))
