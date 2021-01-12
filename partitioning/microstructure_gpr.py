@@ -202,7 +202,7 @@ class L2RBF(gp.kernels.RBF):
         if self.dim_range: 
             A = A[self.dim_range[0]:self.dim_range[1],:]
         if self.comp: 
-            A = np.r_[A,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
+            A = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],A]
         A = A.T # Use transpose since vectors are represented by rows not columns.
         self.A = A
         
@@ -342,9 +342,10 @@ class physRBF(gp.kernels.RBF):
 # RBF classes with projection of composition onto a smaller subspace
 class subspace_L2RBF(L2RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
-                 groups=np.ones([15,1]),
+                 groups=np.arange(15),num_groups=15,
                  dims=15,dim_range=None,comp=True):
         self.groups = groups
+        self.num_groups = num_groups
         super(subspace_L2RBF,self).__init__(length_scale,length_scale_bounds,
                  dims,dim_range,comp)
         
@@ -354,18 +355,18 @@ class subspace_L2RBF(L2RBF):
         if self.dim_range: 
             Ilike = Ilike[self.dim_range[0]:self.dim_range[1],:]
         if self.comp: 
-            Ilike = np.r_[Ilike,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
-        # Subspace projection part of matrix
-        A = np.zeros([len(self.groups),len(sum(self.groups,[]))])
-        for row,group in enumerate(self.groups):
-            A[row][group] = 1. 
+            Ilike = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],Ilike]        # Subspace projection part of matrix
+        A = np.zeros([self.num_groups,len(self.groups)])
+        for col,group in enumerate(self.groups):
+            A[group][col]=1.
         self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
     
 class subspace_L1RBF(L1RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
-                 groups=np.ones([15,1]),
+                 groups=np.arange(15),num_groups=15,
                  dims=15,dim_range=None,comp=True):
         self.groups = groups
+        self.num_groups = num_groups
         super(subspace_L1RBF,self).__init__(length_scale,length_scale_bounds,
                  dims,dim_range,comp)
         
@@ -375,13 +376,177 @@ class subspace_L1RBF(L1RBF):
         if self.dim_range: 
             Ilike = Ilike[self.dim_range[0]:self.dim_range[1],:]
         if self.comp: 
-            Ilike = np.r_[Ilike,[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))]]
-        # Subspace projection part of matrix
-        A = np.zeros([len(self.groups),len(sum(self.groups,[]))])
-        for row,group in enumerate(self.groups):
-            A[row][group] = 1. 
+            Ilike = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],Ilike]        # Subspace projection part of matrix
+        A = np.zeros([self.num_groups,len(self.groups)])
+        for col,group in enumerate(self.groups):
+            A[group][col]=1.
         self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
+        
+# Allow projections but also allow mixing of groups.
+class subspace_mixing_L2RBF(subspace_L2RBF):
+    def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
+                 mix_vals = np.array([0.5]),mix_val_bounds = (0.001,0.999),
+                 groups=np.arange(15),num_groups=15,
+                 dims=15,dim_range=None,comp=True):
+        self.mix_vals = mix_vals
+        self.mix_val_bounds = mix_val_bounds
+        super(subspace_mixing_L2RBF,self).__init__(length_scale,length_scale_bounds,
+                                                   groups,num_groups,dims,dim_range,comp)
+    
+    @property
+    def hyperparameter_mix_vals(self):
+        return gp.kernels.Hyperparameter("mix_vals","numeric",
+                                         self.mix_val_bounds,
+                                         len(self.mix_vals))
+    
+    def __repr__(self):
+        if self.anisotropic:
+            return "{0}(length_scale=[{1}], mix_vals=[{2}])".format(
+                self.__class__.__name__, 
+                ", ".join(map("{0:.3g}".format,self.length_scale)),
+                ", ".join(map("{0:.3g}".format,self.mix_vals)))
+        else:  # isotropic
+            return "{0}(length_scale={1:.3g}, mix_vals=[{2}])".format(
+                self.__class__.__name__, np.ravel(self.length_scale)[0],
+                ", ".join(map("{0:.3g}".format,self.mix_vals)))
+        
+    def constr_trans(self):
+        # Same part of transformation as above (convert to composition)
+        Ilike = np.eye(self.dims)
+        mixed_groups_only = np.empty_like(self.mix_vals,dtype="int",shape=(self.mix_vals.shape[0],2)) # store for later
+        mixed_el_pos = np.empty_like(self.mix_vals,dtype="int")
+        if self.dim_range: 
+            Ilike = Ilike[self.dim_range[0]:self.dim_range[1],:]
+        if self.comp: 
+            Ilike = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],Ilike]
+        # Subspace projection part of matrix
+        A = np.zeros([self.num_groups,len(self.groups)])
+        mix_val_pos = 0
+        for col,group in enumerate(self.groups):
+            if np.size(group)==1:
+                A[group][col]=1.
+            else: # Mixed groups
+                mixed_groups_only[mix_val_pos] = group
+                mixed_el_pos[mix_val_pos] = col
+                for i,group_i in enumerate(group):
+                    if i>0:
+                        A[group_i][col] = self.mix_vals[mix_val_pos]
+                    else:
+                        A[group_i][col] = 1.-self.mix_vals[mix_val_pos]
+                mix_val_pos += 1
+        self.mixed_groups = mixed_groups_only
+        self.mixed_el_pos = mixed_el_pos
+        self.A = A.T # Use transpose since vectors are represented by rows not columns.
+        self.Ilike = Ilike.T
+        
+    def compute_gradient(self,X,X_pr,A,K,gradient):
+        for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
+            a,b = ab
+            grad_i = -mix_val*squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))*K
+            grad_i = grad_i[:,:,np.newaxis]
+            gradient = np.dstack((gradient,grad_i))
+        return gradient
+    
+    def __call__(self, X, Y=None, eval_gradient=False):
+        X = np.atleast_2d(X) @ self.Ilike # Change the vector to one representing composition incl. base element
+        X_pr = X @ self.A # X projected onto subspace
+        length_scale = gp.kernels._check_length_scale(X_pr, self.length_scale)
+        if Y is None:
+            dists = pdist(X_pr / length_scale, metric='sqeuclidean')
+            K = np.exp(-.5 * dists)
+            # convert from upper-triangular matrix to square matrix
+            K = squareform(K)
+            np.fill_diagonal(K, 1)
+        else:
+            if eval_gradient:
+                raise ValueError(
+                    "Gradient can only be evaluated when Y is None.")
+            Y = Y @ self.Ilike
+            Y_pr = Y @ self.A
+            dists = cdist(X_pr/ length_scale, Y_pr / length_scale,
+                          metric='sqeuclidean')
+            K = np.exp(-.5 * dists)
 
+        if eval_gradient:
+            if self.hyperparameter_length_scale.fixed:
+                # Hyperparameter l kept fixed
+                return K, np.empty(((X_pr).shape[0], (X_pr).shape[0], 0))
+            elif not self.anisotropic or length_scale.shape[0] == 1:
+                length_scale_gradient = \
+                    (K * squareform(dists))[:, :, np.newaxis]
+                # Derivative wrt mixing variables
+                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                return K, K_gradient
+            elif self.anisotropic:
+                # We need to recompute the pairwise dimension-wise distances
+                length_scale_gradient = ((X_pr)[:, np.newaxis, :] - (X_pr)[np.newaxis, :, :])**2 \
+                    / length_scale
+                length_scale_gradient *= K[..., np.newaxis]
+                # Derivative wrt mixing variables
+                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                return K, K_gradient
+        else:
+            return K
+        
+# Allow projections but also allow mixing of groups.
+class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
+    def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
+                 mix_vals = np.array([0.5]),mix_val_bounds = (0.001,0.999),
+                 groups=np.arange(15),num_groups=15,
+                 dims=15,dim_range=None,comp=True):
+        super(subspace_mixing_L1RBF,self).__init__(length_scale,length_scale_bounds,
+                                                   mixed_vals,mix_val_bounds,
+                                                   groups,num_groups,dims,dim_range,comp)
+    
+    def compute_gradient(self,X,X_pr,A,K,gradient):
+        for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
+            a,b = ab
+            grad_i = -mix_val*squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))*K
+            grad_i = grad_i[:,:,np.newaxis]
+            gradient = np.dstack((gradient,grad_i))
+        return gradient
+    
+    def __call__(self, X, Y=None, eval_gradient=False):
+        X = np.atleast_2d(X) @ self.Ilike # Change the vector to one representing composition incl. base element
+        X_pr = X @ self.A # X projected onto subspace
+        length_scale = gp.kernels._check_length_scale(X_pr, self.length_scale)
+        if Y is None:
+            dists = pdist(X_pr / length_scale, metric='sqeuclidean')
+            K = np.exp(-.5 * dists)
+            # convert from upper-triangular matrix to square matrix
+            K = squareform(K)
+            np.fill_diagonal(K, 1)
+        else:
+            if eval_gradient:
+                raise ValueError(
+                    "Gradient can only be evaluated when Y is None.")
+            Y = Y @ self.Ilike
+            Y_pr = Y @ self.A
+            dists = cdist(X_pr/ length_scale, Y_pr / length_scale,
+                          metric='sqeuclidean')
+            K = np.exp(-.5 * dists)
+
+        if eval_gradient:
+            if self.hyperparameter_length_scale.fixed:
+                # Hyperparameter l kept fixed
+                return K, np.empty(((X_pr).shape[0], (X_pr).shape[0], 0))
+            elif not self.anisotropic or length_scale.shape[0] == 1:
+                length_scale_gradient = \
+                    (K * squareform(dists))[:, :, np.newaxis]
+                # Derivative wrt mixing variables
+                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                return K, K_gradient
+            elif self.anisotropic:
+                # We need to recompute the pairwise dimension-wise distances
+                length_scale_gradient = ((X_pr)[:, np.newaxis, :] - (X_pr)[np.newaxis, :, :])**2 \
+                    / length_scale
+                length_scale_gradient *= K[..., np.newaxis]
+                # Derivative wrt mixing variables
+                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                return K, K_gradient
+        else:
+            return K
+      
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Process database in order to get all the microstructural data.
@@ -446,6 +611,31 @@ for fold_i in range(n_folds):
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL FITTING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     # FITTING PROCEDURE
+    # Setup kernel here.
+    groups = [0,0,0,1,1,2,2,1,2,1] # Grouping of elements in subspace projection
+    #groups = [0,(0, 2),0,(0, 1),(0, 1),2,2,(0, 1),2,(0, 1)]
+    #kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
+    kernel = ConstantKernel(1.0,(1.e-3,1.e3)) \
+        * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
+            * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
+    kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * \
+        (subspace_L1RBF(0.1,(1.e-4,1.e3),groups=groups,num_groups=3,dim_range=comp_range,comp=True) + \
+        ConstantKernel(0.01,(1.e-5,1.e-1)) * \
+            L1RBF(0.1,(1.e-4,1e3),dim_range=comp_range,comp=True) + \
+                ConstantKernel(0.01,(1.e-5,1.)) * \
+                    #L2RBF(0.1,(1.e-4,1.e3),dim_range=ht_range,comp=False))
+                    physRBF(1.e4,(1.e1,1.e7),dims=15,dim_range=ht_range))
+    # kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * \
+    #     (subspace_mixing_L1RBF(0.1,(1.e-4,1.e3),
+    #                            mix_vals=np.array([0.5,0.9,0.9,0.5,0.5]),
+    #                            groups=groups,num_groups=3,dim_range=comp_range,comp=True) + \
+    #      ConstantKernel(0.01,(1.e-5,1.e-1)) * \
+    #          L1RBF(0.1,(1.e-4,1e3),dim_range=comp_range,comp=True) + \
+    #              ConstantKernel(0.01,(1.e-5,1.)) * \
+    #                  #L2RBF(0.1,(1.e-4,1.e3),dim_range=ht_range,comp=False))
+    #                  physRBF(1.e4,(1.e1,1.e7),dims=15,dim_range=ht_range))
+    alpha_noise = 0.02
+    # Stored models...
     models = {}
     scalers = {}
     # Learn partitioning coefficients models for each element and part. coeff.
@@ -453,29 +643,19 @@ for fold_i in range(n_folds):
         X = ml_data_dict[el][0]
         if standardise_ht and standardise_comp:
             scaler = PartScaler(with_mean=False)
+            X = scaler.fit_transform(X)
         elif standardise_ht:
             scaler = PartScaler(ht_range,with_mean=False)
+            X = scaler.fit_transform(X)
         elif standardise_comp:
             scaler = PartScaler(comp_range,with_mean=False)
             X = scaler.fit_transform(X)
         sub_models = {}
-        groups = [[0,1,2],[3,4,7,9],[5,6,8]] # Grouping of elements in subspace projection
-        # Setup kernel here.
-        #kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
-        #kernel = ConstantKernel(1.0,(1.e-3,1.e3)) \
-        #    * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
-        #        * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
-        kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * \
-            (subspace_L1RBF(0.1,(1.e-4,1.e3),groups=groups,dim_range=comp_range,comp=True) + \
-             ConstantKernel(0.01,(1.e-5,1.e-1)) * \
-                 L1RBF(0.1,(1.e-4,1e3),dim_range=comp_range,comp=True) + \
-                     ConstantKernel(0.01,(1.e-5,1.e-1)) * \
-                         physRBF(1.e-4,(1.e-7,1.e-1),dims=15,dim_range=ht_range))
         for a,part_coeff_type in enumerate(["1/2","nom/2"]):
             gpr = GaussianProcessRegressor(kernel=kernel,
                                            normalize_y=True,
                                            random_state=seed,
-                                           alpha=0.07,
+                                           alpha=alpha_noise,
                                            n_restarts_optimizer=2)
             gpr.fit(X,ml_data_dict[el][1][:,a])
             sub_models[part_coeff_type] = gpr
@@ -486,8 +666,10 @@ for fold_i in range(n_folds):
     X = f_data[0]
     if standardise_ht and standardise_comp:
         scaler = PartScaler(with_mean=False)
+        X = scaler.fit_transform(X)
     elif standardise_ht:
         scaler = PartScaler(ht_range,with_mean=False)
+        X = scaler.fit_transform(X)
     elif standardise_comp:
         scaler = PartScaler(comp_range,with_mean=False)
         X = scaler.fit_transform(X)
@@ -495,7 +677,7 @@ for fold_i in range(n_folds):
     gpr = GaussianProcessRegressor(kernel=kernel,
                                    normalize_y=True,
                                    random_state=seed,
-                                   alpha=0.01,
+                                   alpha=alpha_noise,
                                    n_restarts_optimizer=2)
     gpr.fit(X,f_fit)
     models["f"] = gpr
@@ -549,8 +731,8 @@ for fold_i in range(n_folds):
     f_errs_kfolds = np.append(f_errs_kfolds,f_best_errs)
 # Some final output
 print("\n\n---------------------------------------------------\n")
-f_comm_t_kfolds = f_t_kfolds[(f_t_kfolds>=0.6) & (f_t_kfolds<=0.8)]
-f_comm_best_kfolds = f_best_kfolds[(f_t_kfolds>=0.6) & (f_t_kfolds<=0.8)]
+f_comm_t_kfolds = f_t_kfolds[(f_t_kfolds>=0.55) & (f_t_kfolds<=0.85)]
+f_comm_best_kfolds = f_best_kfolds[(f_t_kfolds>=0.55) & (f_t_kfolds<=0.85)]
 print("Overall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_t_kfolds,f_best_kfolds)))
 print("Overall R^2 score for commercial alloys only = {:5f}".format(r2_score(f_comm_t_kfolds,f_comm_best_kfolds)))
 print("Pearson's r for commercial alloys only = {:5f}".format(pearsonr(f_comm_t_kfolds,f_comm_best_kfolds)[0]))
