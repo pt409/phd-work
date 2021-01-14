@@ -27,6 +27,23 @@ from scipy.spatial.distance import pdist, cdist, squareform
 import configparser
 import sys
 
+# Function to parse list/tuple-like things in config file:
+def parse_listlike(list_string):
+    flag = 0
+    py_groups = []
+    for word in groups.split(","):
+        if word[0]=="(":
+            flag = 1
+            py_groups += [(int(word[1:]),)]
+        elif word[-1]==")":
+            py_groups[-1] += (int(word[:-1]),)
+            flag = 0
+        elif flag==1:
+            py_groups[-1] += (int(word),)
+        else:
+            py_groups += [int(word)]
+    return py_groups
+    
 # Some options.
 # Uses a configparser file (.ini structure).
 config_default = "test"
@@ -37,17 +54,33 @@ if len(sys.argv) > 1:
         config_type = sys.argv[1]
     else: config_type = config_default
 else: config_type = config_default
+my_config = config[config_type]
+# Read config file in:
 incl_ht = True # Always include ht in this version of the code.
-comp_kernel_type = config[config_type].get("comp_kernel_type")
-ht_kernel_type = config[config_type].get("ht_kernel_type")
-opt_models_pkl_0 = config[config_type].get("output_models")
-database = config[config_type].get("database")
-test_frac = config[config_type].getfloat("test_pc")/100.0
-seed = config[config_type].getint("seed")
-standardise_ht = config[config_type].getboolean("standardise_ht")
-standardise_comp = config[config_type].getboolean("standardise_comp")
-n_fold_testing = config[config_type].getboolean("n_fold_testing")
-n_folds = config[config_type].getint("n_folds")
+#opt_models_pkl_0 = config[config_type].get("output_models")
+database =          my_config.get("database")
+elements =          my_config.get("elements")
+elements = elements.split(",")
+n_els = len(elements)
+n =                 my_config.getint("feature_vector_size")
+n_ht =              my_config.getint("ht_features")
+ht_range = [0,n_ht] ; comp_range = [n_ht,n]
+# Train/test split related stuff
+test_frac =         my_config.getfloat("test_pc")/100.0
+seed =              my_config.getint("seed")
+n_fold_testing =    my_config.getboolean("n_fold_testing")
+n_folds =           my_config.getint("n_folds")
+# Kernel related stuff
+standardise_ht =    my_config.getboolean("standardise_ht")
+standardise_comp =  my_config.getboolean("standardise_comp")
+comp_kernel_0 =     my_config.get("comp_kernel_0")
+comp_kernel_1 =     my_config.get("comp_kernel_1")
+ht_kernel_0 =       my_config.get("ht_kernel_0")
+ht_kernel_1 =       my_config.get("ht_kernel_1")
+alpha_noise =       my_config.getfloat("kernel_noise")
+groups =            my_config.get("projection_groups")
+groups = parse_listlike(groups)
+num_groups =        my_config.getint("projection_rank")
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA PROCESSING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -385,7 +418,7 @@ class subspace_L1RBF(L1RBF):
 # Allow projections but also allow mixing of groups.
 class subspace_mixing_L2RBF(subspace_L2RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
-                 mix_vals = np.array([0.5]),mix_val_bounds = (0.001,0.999),
+                 mix_vals = np.array([0.5]),mix_val_bounds = (1.e-6,1.0),
                  groups=np.arange(15),num_groups=15,
                  dims=15,dim_range=None,comp=True):
         self.mix_vals = mix_vals
@@ -439,7 +472,7 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
         self.A = A.T # Use transpose since vectors are represented by rows not columns.
         self.Ilike = Ilike.T
         
-    def compute_gradient(self,X,X_pr,A,K,gradient):
+    def compute_gradient(self,X,X_pr,K,gradient):
         for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
             a,b = ab
             grad_i = -mix_val*squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))*K
@@ -475,7 +508,7 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
                 length_scale_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
                 # Derivative wrt mixing variables
-                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                K_gradient = self.compute_gradient(X,X_pr,K,length_scale_gradient)
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
@@ -483,7 +516,7 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
                     / length_scale
                 length_scale_gradient *= K[..., np.newaxis]
                 # Derivative wrt mixing variables
-                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                K_gradient = self.compute_gradient(X,X_pr,K,length_scale_gradient)
                 return K, K_gradient
         else:
             return K
@@ -491,14 +524,14 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
 # Allow projections but also allow mixing of groups.
 class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
-                 mix_vals = np.array([0.5]),mix_val_bounds = (0.001,0.999),
+                 mix_vals = np.array([0.5]),mix_val_bounds = (1.e-6,1.0),
                  groups=np.arange(15),num_groups=15,
                  dims=15,dim_range=None,comp=True):
         super(subspace_mixing_L1RBF,self).__init__(length_scale,length_scale_bounds,
-                                                   mixed_vals,mix_val_bounds,
+                                                   mix_vals,mix_val_bounds,
                                                    groups,num_groups,dims,dim_range,comp)
     
-    def compute_gradient(self,X,X_pr,A,K,gradient):
+    def compute_gradient(self,X,X_pr,K,gradient):
         for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
             a,b = ab
             grad_i = -mix_val*squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))*K
@@ -534,7 +567,7 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
                 length_scale_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
                 # Derivative wrt mixing variables
-                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                K_gradient = self.compute_gradient(X,X_pr,K,length_scale_gradient)
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
@@ -542,7 +575,7 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
                     / length_scale
                 length_scale_gradient *= K[..., np.newaxis]
                 # Derivative wrt mixing variables
-                K_gradient = self.compute_gradient(X,X_pr,A,K,length_scale_gradient)
+                K_gradient = self.compute_gradient(X,X_pr,K,length_scale_gradient)
                 return K, K_gradient
         else:
             return K
@@ -557,7 +590,49 @@ f_t_kfolds = np.array([])
 f_best_kfolds = np.array([])
 f_errs_kfolds = np.array([])
 best_models_kfolds = np.array([])
-f_all_kfolds = np.empty([11,0])
+f_all_kfolds = np.empty([n_els+1,0])
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% KERNEL SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+# Sets up kernel using settings in config file
+def setup_kernel(kernel_type,feature_range):
+    kernel_settings = kernel_type.lower().split("_")
+    if kernel_settings[-1] == "comp":
+        comp_style = True
+    if kernel_settings[0] == "l1rbf":
+        kernel = L1RBF(1.0,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
+    elif kernel_settings[0] == "l2rbf":
+        kernel = L2RBF(1.0,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
+    elif kernel_settings[0] == "physrbf":
+        kernel = physRBF(1.e4,(1.e-1,1.e8),dims=n,dim_range=feature_range)
+    elif kernel_settings[0] == "l1rbfpr":
+        kernel = subspace_L1RBF(1.0,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
+                                dim_range=feature_range,comp=comp_style)
+    elif kernel_settings[0] == "l2rbfpr":
+        kernel = subspace_L2RBF(1.0,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
+                                dim_range=feature_range,comp=comp_style)
+    elif kernel_settings[0] == "l1rbfmixpr":
+        kernel = subspace_mixing_L1RBF(1.0,(1.e-5,1.e5),
+                                       mix_vals=np.array([0.5,0.9,0.9,0.5,0.5]),
+                                       groups=groups,num_groups=num_groups,
+                                       dim_range=feature_range,comp=comp_style)
+    elif kernel_settings[0] == "l2rbfmixpr":
+        kernel = subspace_mixing_L2RBF(1.0,(1.e-5,1.e5),
+                                       mix_vals=np.array([0.5,0.9,0.9,0.5,0.5]),
+                                       groups=groups,num_groups=num_groups,
+                                       dim_range=feature_range,comp=comp_style)
+    else:
+        kernel = None
+    return kernel
+kernel = setup_kernel(comp_kernel_0,comp_range)
+if kernel:
+    for range_,kernel_type in zip((comp_range,ht_range,ht_range),(comp_kernel_1,ht_kernel_0,ht_kernel_1)):
+        kernel_1 = setup_kernel(kernel_type,range_)
+        if kernel_1:
+            kernel += ConstantKernel(0.01,(1.e-6,1.)) * kernel_1
+else:
+    print("Kernel has been misdefined in config file.")
+kernel *= ConstantKernel()
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% K-FOLDS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -567,17 +642,15 @@ for fold_i in range(n_folds):
         N_train = N - N_test
         train_df = pd.concat([ms_df.iloc[(fold_i+1)*N_test:,:],ms_df.iloc[:fold_i*N_test,:]])
         test_df  = ms_df.iloc[fold_i*N_test:(fold_i+1)*N_test,:]
-        opt_models_pkl = ".".join([x+y for x,y in zip(opt_models_pkl_0.split("."),["_{:}".format(fold_i),""])])
+        #opt_models_pkl = ".".join([x+y for x,y in zip(opt_models_pkl_0.split("."),["_{:}".format(fold_i),""])])
         print("---------------------------------------------------\nBEGINNING FIT TO TRAINING DATA SELECTION {:}\n---------------------------------------------------\n".format(fold_i))
     else:
         N_train = int(np.rint(N*(1.-test_frac)))
         train_df = ms_df.iloc[:N_train,:]
         test_df  = ms_df.iloc[N_train:,:]
-        opt_models_pkl = opt_models_pkl_0
+        #opt_models_pkl = opt_models_pkl_0
     
-    elements = ["Ni","Cr","Co","Re","Ru","Al","Ta","W","Ti","Mo"]
     output_head = "        \t"+"       \t".join(elements)+"\n"
-    ht_range = [0,6] ; comp_range = [6,15]
     
     # Process all the data from a database:
     def process_all_data(df): 
@@ -610,31 +683,7 @@ for fold_i in range(n_folds):
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL FITTING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    # FITTING PROCEDURE
-    # Setup kernel here.
-    groups = [0,0,0,1,1,2,2,1,2,1] # Grouping of elements in subspace projection
-    #groups = [0,(0, 2),0,(0, 1),(0, 1),2,2,(0, 1),2,(0, 1)]
-    #kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * gp.kernels.RBF(0.1,(1.e-3,1.e2))
-    kernel = ConstantKernel(1.0,(1.e-3,1.e3)) \
-        * L2RBF(0.1,(1.e-3,1e2),dim_range=ht_range,comp=False) \
-            * L1RBF(0.1,(1.e-3,1e2),dim_range=comp_range,comp=True)
-    kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * \
-        (subspace_L1RBF(0.1,(1.e-4,1.e3),groups=groups,num_groups=3,dim_range=comp_range,comp=True) + \
-        ConstantKernel(0.01,(1.e-5,1.e-1)) * \
-            L1RBF(0.1,(1.e-4,1e3),dim_range=comp_range,comp=True) + \
-                ConstantKernel(0.01,(1.e-5,1.)) * \
-                    #L2RBF(0.1,(1.e-4,1.e3),dim_range=ht_range,comp=False))
-                    physRBF(1.e4,(1.e1,1.e7),dims=15,dim_range=ht_range))
-    # kernel = ConstantKernel(1.0,(1.e-3,1.e3)) * \
-    #     (subspace_mixing_L1RBF(0.1,(1.e-4,1.e3),
-    #                            mix_vals=np.array([0.5,0.9,0.9,0.5,0.5]),
-    #                            groups=groups,num_groups=3,dim_range=comp_range,comp=True) + \
-    #      ConstantKernel(0.01,(1.e-5,1.e-1)) * \
-    #          L1RBF(0.1,(1.e-4,1e3),dim_range=comp_range,comp=True) + \
-    #              ConstantKernel(0.01,(1.e-5,1.)) * \
-    #                  #L2RBF(0.1,(1.e-4,1.e3),dim_range=ht_range,comp=False))
-    #                  physRBF(1.e4,(1.e1,1.e7),dims=15,dim_range=ht_range))
-    alpha_noise = 0.02
+    # FITTING PROCEDURE            
     # Stored models...
     models = {}
     scalers = {}

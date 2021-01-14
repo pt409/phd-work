@@ -1,17 +1,31 @@
 [DEFAULT]
-comp_kernel_type = special
-ht_kernel_type = rbf
-output_models = rigorous/final_models.pkl
+# Data details
 database = ../datasets/processing/processed_alloy_database_v4.csv
-test_pc = 13.0
+elements = Ni,Cr,Co,Re,Ru,Al,Ta,W,Ti,Mo
+# Size of feature vector and number of features that correspond to heat treatments
+feature_vector_size = 15
+ht_features = 6
+# Configures split into train/test dataset (or datasets in case of n-fold testing).
 seed = 2106
-standardise_ht = false
-standardise_comp = false
+test_pc = 13.0
 n_fold_testing = false
 n_folds = 1
+# Kernel settings.
+standardise_ht = false
+standardise_comp = false
+kernel_noise = 0.05
+# Options for kernels: L2RBF, L1RBF, physRBF, L1RBFpr, L2RBFpr, L1RBFmixPr, L2RBFmixPr, None ...
+# ... or the same but suffixed with _comp to include composition transformation in kernel...
+# ... kernels that project features to a subspace need supply a grouping too. 
+comp_kernel_0 = L1RBFpr_comp
+comp_kernel_1 = L1RBF_comp
+ht_kernel_0 = physRBF
+ht_kernel_1 = None
+# Grouping (i.e. rank of projection matrix, and position of 1s in matrix).
+projection_rank = 3
+projection_groups = 0,0,0,1,1,2,2,1,2,1
 
 [test]
-output_models = test_model.pkl
 n_fold_testing = true
 n_folds = 6
 seed = 2106
