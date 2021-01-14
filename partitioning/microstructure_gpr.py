@@ -81,6 +81,7 @@ alpha_noise =       my_config.getfloat("kernel_noise")
 groups =            my_config.get("projection_groups")
 groups = parse_listlike(groups)
 num_groups =        my_config.getint("projection_rank")
+v =                 my_config.getint("verbosity")
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA PROCESSING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -472,15 +473,21 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
         self.A = A.T # Use transpose since vectors are represented by rows not columns.
         self.Ilike = Ilike.T
         
+    def update_trans(self):
+        self.A[self.mixed_el_pos,self.mixed_groups[:,0]] = 1. - self.mix_vals
+        self.A[self.mixed_el_pos,self.mixed_groups[:,1]] = self.mix_vals
+        
     def compute_gradient(self,X,X_pr,K,gradient):
         for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
             a,b = ab
-            grad_i = -mix_val*squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))*K
+            grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))
+            grad_i *= -mix_val*K/(self.length_scale**2)
             grad_i = grad_i[:,:,np.newaxis]
             gradient = np.dstack((gradient,grad_i))
         return gradient
     
     def __call__(self, X, Y=None, eval_gradient=False):
+        self.update_trans()
         X = np.atleast_2d(X) @ self.Ilike # Change the vector to one representing composition incl. base element
         X_pr = X @ self.A # X projected onto subspace
         length_scale = gp.kernels._check_length_scale(X_pr, self.length_scale)
@@ -534,12 +541,15 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
     def compute_gradient(self,X,X_pr,K,gradient):
         for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
             a,b = ab
-            grad_i = -mix_val*squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))*K
+            grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i]) \
+                                *pdist(X_pr,lambda x,y: (x[b]-y[b])/abs(x[b]-y[b])-(x[a]-y[a])/abs(x[a]-y[a])))
+            grad_i *= -mix_val*K/self.length_scale
             grad_i = grad_i[:,:,np.newaxis]
             gradient = np.dstack((gradient,grad_i))
         return gradient
     
     def __call__(self, X, Y=None, eval_gradient=False):
+        self.update_trans()
         X = np.atleast_2d(X) @ self.Ilike # Change the vector to one representing composition incl. base element
         X_pr = X @ self.A # X projected onto subspace
         length_scale = gp.kernels._check_length_scale(X_pr, self.length_scale)
@@ -579,6 +589,22 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
                 return K, K_gradient
         else:
             return K
+        
+# Function to print mixing values from a fitted kernel
+def get_mixing_vals(elements,gpr_model):
+    all_params = gpr_model.kernel_.get_params()
+    for param_name,param_value in all_params.items():
+        if "mix_vals" in param_name:
+            kernel_component = gpr_model.kernel_
+            for word in param_name.split("__"):
+                if "k1" in word:
+                    kernel_component = kernel_component.k1
+                elif "k2" in word:
+                    kernel_component = kernel_component.k2
+            trans = kernel_component.A.T
+            for row in trans:
+                print(" + ".join([" ".join(_) for _ in np.transpose([list(map("{:.4f}".format,row)),elements])]))
+            
       
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -597,6 +623,7 @@ f_all_kfolds = np.empty([n_els+1,0])
 # Sets up kernel using settings in config file
 def setup_kernel(kernel_type,feature_range):
     kernel_settings = kernel_type.lower().split("_")
+    mixing = False
     if kernel_settings[-1] == "comp":
         comp_style = True
     if kernel_settings[0] == "l1rbf":
@@ -612,24 +639,29 @@ def setup_kernel(kernel_type,feature_range):
         kernel = subspace_L2RBF(1.0,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
                                 dim_range=feature_range,comp=comp_style)
     elif kernel_settings[0] == "l1rbfmixpr":
+        init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
         kernel = subspace_mixing_L1RBF(1.0,(1.e-5,1.e5),
-                                       mix_vals=np.array([0.5,0.9,0.9,0.5,0.5]),
+                                       mix_vals=init_mix_vals,
                                        groups=groups,num_groups=num_groups,
                                        dim_range=feature_range,comp=comp_style)
+        mixing = True
     elif kernel_settings[0] == "l2rbfmixpr":
+        init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
         kernel = subspace_mixing_L2RBF(1.0,(1.e-5,1.e5),
-                                       mix_vals=np.array([0.5,0.9,0.9,0.5,0.5]),
+                                       mix_vals=init_mix_vals,
                                        groups=groups,num_groups=num_groups,
                                        dim_range=feature_range,comp=comp_style)
+        mixing = True
     else:
         kernel = None
-    return kernel
-kernel = setup_kernel(comp_kernel_0,comp_range)
+    return kernel,mixing
+kernel,use_mixing = setup_kernel(comp_kernel_0,comp_range)
 if kernel:
     for range_,kernel_type in zip((comp_range,ht_range,ht_range),(comp_kernel_1,ht_kernel_0,ht_kernel_1)):
-        kernel_1 = setup_kernel(kernel_type,range_)
+        kernel_1,use_mixing_1 = setup_kernel(kernel_type,range_)
         if kernel_1:
             kernel += ConstantKernel(0.01,(1.e-6,1.)) * kernel_1
+        use_mixing = use_mixing or use_mixing_1
 else:
     print("Kernel has been misdefined in config file.")
 kernel *= ConstantKernel()
@@ -700,13 +732,18 @@ for fold_i in range(n_folds):
             scaler = PartScaler(comp_range,with_mean=False)
             X = scaler.fit_transform(X)
         sub_models = {}
-        for a,part_coeff_type in enumerate(["1/2","nom/2"]):
+        for a,part_coeff_type in enumerate(["1:2","nom:2"]):
             gpr = GaussianProcessRegressor(kernel=kernel,
                                            normalize_y=True,
                                            random_state=seed,
                                            alpha=alpha_noise,
                                            n_restarts_optimizer=2)
+            if v>1:
+                print("Fitting model for "+el+" phase "+part_coeff_type+" partitioning coefficient...")
             gpr.fit(X,ml_data_dict[el][1][:,a])
+            if v>2 and use_mixing:
+                print("Pseudo-element representation for model:")
+                get_mixing_vals(elements,gpr)
             sub_models[part_coeff_type] = gpr
         models[el] = sub_models
         if standardise_ht or standardise_comp:
@@ -728,6 +765,8 @@ for fold_i in range(n_folds):
                                    random_state=seed,
                                    alpha=alpha_noise,
                                    n_restarts_optimizer=2)
+    if v>1:
+        print("Fitting model for phase fraction f.")
     gpr.fit(X,f_fit)
     models["f"] = gpr
     if standardise_ht or standardise_comp:
@@ -742,8 +781,8 @@ for fold_i in range(n_folds):
             X = scalers[el].transform(X_ms_t)
         else:
             X = X_ms_t.copy()
-        K1,K_err1 = models[el]["1/2"].predict(X,return_std=True)
-        K2,K_err2 = models[el]["nom/2"].predict(X,return_std=True)
+        K1,K_err1 = models[el]["1:2"].predict(X,return_std=True)
+        K2,K_err2 = models[el]["nom:2"].predict(X,return_std=True)
         f_ = (np.exp(K2)-np.exp(K1))/(1-np.exp(K1))
         f_err = ((np.exp(K2)/(1-np.exp(K1)))**2 * K_err1**2 + (np.exp(K1)*(-1+np.exp(K2))/(1-np.exp(K1)**2))**2 * K_err2**2)**0.5
         f_all += [f_]
@@ -771,7 +810,7 @@ for fold_i in range(n_folds):
     best_models = best_locs[0] # Store which models were best for which data points on this fold.
     f_best = f_all[best_locs]
     f_best_errs = f_err_all[best_locs] # Want absolute errors here.
-    print("R^2 score for fold {:} = {:5f}".format(fold_i,r2_score(f_t,f_best)))
+    print("\nR^2 score for fold {:} = {:5f}".format(fold_i,r2_score(f_t,f_best)))
     # Things we're interested in for all k-folds.
     f_all_kfolds = np.append(f_all_kfolds,f_all,axis=1)
     f_t_kfolds = np.append(f_t_kfolds,f_t)
@@ -779,10 +818,10 @@ for fold_i in range(n_folds):
     best_models_kfolds = np.append(best_models_kfolds,best_models)
     f_errs_kfolds = np.append(f_errs_kfolds,f_best_errs)
 # Some final output
-print("\n\n---------------------------------------------------\n")
+print("\n\n---------------------------------------------------")
 f_comm_t_kfolds = f_t_kfolds[(f_t_kfolds>=0.55) & (f_t_kfolds<=0.85)]
 f_comm_best_kfolds = f_best_kfolds[(f_t_kfolds>=0.55) & (f_t_kfolds<=0.85)]
-print("Overall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_t_kfolds,f_best_kfolds)))
+print("\nOverall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_t_kfolds,f_best_kfolds)))
 print("Overall R^2 score for commercial alloys only = {:5f}".format(r2_score(f_comm_t_kfolds,f_comm_best_kfolds)))
 print("Pearson's r for commercial alloys only = {:5f}".format(pearsonr(f_comm_t_kfolds,f_comm_best_kfolds)[0]))
 # Use to get colours for different models for each datapt, e.g. for plotting 
