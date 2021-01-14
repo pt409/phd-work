@@ -510,7 +510,7 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
         if eval_gradient:
             if self.hyperparameter_length_scale.fixed:
                 # Hyperparameter l kept fixed
-                return K, np.empty(((X_pr).shape[0], (X_pr).shape[0], 0))
+                return K, np.empty((X_pr.shape[0], X_pr.shape[0], 0))
             elif not self.anisotropic or length_scale.shape[0] == 1:
                 length_scale_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
@@ -519,7 +519,7 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
-                length_scale_gradient = ((X_pr)[:, np.newaxis, :] - (X_pr)[np.newaxis, :, :])**2 \
+                length_scale_gradient = (X_pr[:, np.newaxis, :] - X_pr[np.newaxis, :, :])**2 \
                     / length_scale
                 length_scale_gradient *= K[..., np.newaxis]
                 # Derivative wrt mixing variables
@@ -542,7 +542,7 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
         for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
             a,b = ab
             grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i]) \
-                                *pdist(X_pr,lambda x,y: (x[b]-y[b])/abs(x[b]-y[b])-(x[a]-y[a])/abs(x[a]-y[a])))
+                                *pdist(X_pr,lambda x,y: np.sign(x[b]-y[b]) - np.sign(x[a]-y[a])))
             grad_i *= -mix_val*K/self.length_scale
             grad_i = grad_i[:,:,np.newaxis]
             gradient = np.dstack((gradient,grad_i))
@@ -554,8 +554,8 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
         X_pr = X @ self.A # X projected onto subspace
         length_scale = gp.kernels._check_length_scale(X_pr, self.length_scale)
         if Y is None:
-            dists = pdist(X_pr / length_scale, metric='sqeuclidean')
-            K = np.exp(-.5 * dists)
+            dists = pdist(X_pr / length_scale, metric='cityblock')
+            K = np.exp(-dists)
             # convert from upper-triangular matrix to square matrix
             K = squareform(K)
             np.fill_diagonal(K, 1)
@@ -566,13 +566,13 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
             Y = Y @ self.Ilike
             Y_pr = Y @ self.A
             dists = cdist(X_pr/ length_scale, Y_pr / length_scale,
-                          metric='sqeuclidean')
-            K = np.exp(-.5 * dists)
+                          metric='cityblock')
+            K = np.exp(-dists)
 
         if eval_gradient:
             if self.hyperparameter_length_scale.fixed:
                 # Hyperparameter l kept fixed
-                return K, np.empty(((X_pr).shape[0], (X_pr).shape[0], 0))
+                return K, np.empty((X_pr.shape[0], X_pr.shape[0], 0))
             elif not self.anisotropic or length_scale.shape[0] == 1:
                 length_scale_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
@@ -581,7 +581,7 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
-                length_scale_gradient = ((X_pr)[:, np.newaxis, :] - (X_pr)[np.newaxis, :, :])**2 \
+                length_scale_gradient = np.abs(X_pr[:, np.newaxis, :] - X_pr[np.newaxis, :, :]) \
                     / length_scale
                 length_scale_gradient *= K[..., np.newaxis]
                 # Derivative wrt mixing variables
@@ -626,6 +626,8 @@ def setup_kernel(kernel_type,feature_range):
     mixing = False
     if kernel_settings[-1] == "comp":
         comp_style = True
+    else:
+        comp_style = False
     if kernel_settings[0] == "l1rbf":
         kernel = L1RBF(1.0,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
     elif kernel_settings[0] == "l2rbf":
