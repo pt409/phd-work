@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 #import pickle
 
-#from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
 from sklearn.metrics import r2_score
 from scipy.stats import pearsonr
 
@@ -22,7 +21,7 @@ from scipy.spatial.distance import pdist, cdist, squareform
 
 #from itertools import product
 
-#from copy import deepcopy,copy
+from copy import deepcopy,copy
 
 import configparser
 import sys
@@ -81,6 +80,7 @@ alpha_noise =       my_config.getfloat("kernel_noise")
 groups =            my_config.get("projection_groups")
 groups = parse_listlike(groups)
 num_groups =        my_config.getint("projection_rank")
+# Verbosity of output
 v =                 my_config.getint("verbosity")
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA PROCESSING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -589,23 +589,154 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
                 return K, K_gradient
         else:
             return K
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL CLASS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# These 2 classes do all the heavy lifting of fitting models and making predictions
+class sub_model():
+    def __init__(self,gpr_model,scaler,is_element=False):
+        self.gpr = deepcopy(gpr_model)
+        if scaler:
+            self.scaler = deepcopy(scaler)
+        else: self.scaler = None
+        # If the sub_model represents a certain element then we want to exclude it from predictions.
+        self.is_element = is_element
+        self.fitted_flag = False
+        self.train_X = None
+        self.train_y = None
         
-# Function to print mixing values from a fitted kernel
-def get_mixing_vals(elements,gpr_model):
-    all_params = gpr_model.kernel_.get_params()
-    for param_name,param_value in all_params.items():
-        if "mix_vals" in param_name:
-            kernel_component = gpr_model.kernel_
-            for word in param_name.split("__"):
-                if "k1" in word:
-                    kernel_component = kernel_component.k1
-                elif "k2" in word:
-                    kernel_component = kernel_component.k2
-            trans = kernel_component.A.T
-            for row in trans:
-                print(" + ".join([" ".join(_) for _ in np.transpose([list(map("{:.4f}".format,row)),elements])]))
-            
-      
+    def fit(self,X,y):
+        if self.scaler:
+            X = self.scaler.fit_transform(X)
+        self.gpr.fit(X,y)
+        self.fitted_flag = True
+        self.train_X = X
+        self.train_y = y
+    
+    def predict(self,X,return_std=True):
+        if self.fitted_flag:
+            if scaler:
+                X = self.scaler.transform(X)
+                if return_std:
+                    y,y_err = self.gpr.predict(X,return_std=return_std)
+                    if is_element:
+                        y = np.where(X[:,self.is_element]==0.0,np.nan,y)
+                        y_err = np.where(X[:,self.is_element]==0.0,np.inf,y_err)
+                    return y,y_err
+                else:
+                    y = gpr.predict(X,return_std=return_std)
+                    if is_element:
+                        y = np.where(X[:,self.is_element]==0.0,np.nan,y)
+                    return y
+        else: raise ValueError(
+            "Model has not yet been fitted.")
+        
+    # Function to print mixing values from a fitted kernel
+    def get_mixing_vals(self,elements):
+        all_params = self.gpr_model.kernel_.get_params()
+        for param_name,param_value in all_params.items():
+            if "mix_vals" in param_name:
+                kernel_component = self.gpr_model.kernel_
+                for word in param_name.split("__"):
+                    if "k1" in word:
+                        kernel_component = kernel_component.k1
+                    elif "k2" in word:
+                        kernel_component = kernel_component.k2
+                trans = kernel_component.A.T
+                for row in trans:
+                    print(" + ".join([" ".join(_) for _ in np.transpose([list(map("{:.4f}".format,row)),elements])]))
+
+
+class model():
+    def __init__(self,elements,kernel,alpha,seed,
+                 standardise_comp,standardise_ht,
+                 comp_range,ht_range,
+                 n_restarts_optimizer=2,
+                 phases=2,kernel_pr_mixing=False):
+        self.proto_kernel = kernel
+        self.elements = elements
+        self.alpha = alpha
+        self.scale_comp = standardise_comp ; self.scale_ht = standardise_ht
+        self.comp_range = comp_range ; self.ht_range = ht_range
+        self.n_restarts_optimizer = n_restarts_optimizer
+        self.phases = phases
+        self.mixing = kernel_pr_mixing
+        # Run setup of various sub_models
+        self.__setup_sub_models()
+        
+        
+    def __setup_sub_models(self):
+        # Setup a generic scaler
+        if self.scale_ht and self.scale_comp:
+            scaler = PartScaler(with_mean=False)
+        elif self.scale_ht:
+            scaler = PartScaler(self.ht_range,with_mean=False)
+        elif self.scale_comp:
+            scaler = PartScaler(self.comp_range,with_mean=False)
+        else:
+            scaler = None
+        # Setup a generic Gaussian process regression model
+        gpr = GaussianProcessRegressor(kernel=self.proto_kernel,
+                                           normalize_y=True,
+                                           random_state=seed,
+                                           alpha=self.alpha,
+                                           n_restarts_optimizer=self.n_restarts_optimizer)
+        # Add all the relevant sub-models.
+        self.sub_models = {}
+        for ind,el in enumerate(self.elements):
+            self.sub_models[el] = {}
+            # Pass this value to sub_model to work out which elements to exclude in prediction.
+            if ind>0: # Assume base element is always included.
+                element_ind = ind - len(elements)
+            for phase in range(self.phases):
+                part_coeff_name = "nom:{:}".format(phase+1) if phase==0 else "{:}:{:}".format(phase,phase+1)
+                self.sub_models[el][part_coeff_name] = sub_model(gpr,scaler,element_ind)
+        self.sub_models["f"] = {}
+        for phase in range(1,self.phases):
+            self.sub_models["f"]["f{:}".format(phase)] = sub_model(gpr,scaler)
+                
+    def matching_data_struct(self):
+        # Return a data structure matching that of the model
+        structure = {}
+        for el in self.elements:
+            structure[el] = {}
+            for phase in range(self.phases):
+                part_coeff_name = "nom:{:}".format(phase+1) if phase==0 else "{:}:{:}".format(phase,phase+1)
+                structure[el][part_coeff_name] = None
+        structure["f"] = {}
+        for phase in range(1,self.phases):
+            structure["f"]["f{:}".format(phase)] = None
+        return structure
+        
+    def fit_sub_models(self,Xy_data,verbosity=1):
+        # Assume matching data structure, containing tuples or lists containing X,y.
+        for ms_ft,sub_fts in self.sub_models.items():
+            for sub_ft,model in sub_fts.items():
+                model.fit(*Xy_data[ms_ft][sub_ft])
+                # Print some output from the model.
+                if verbosity >= 1:
+                    print("Fitting model for "+ms_ft+" phase "+sub_ft+" feature...")
+                    if verbosity >= 2 and mixing:
+                        print("Pseudo-element representation for model:")
+                        model.get_mixing_vals(self.elements)
+                    print(100*"-")
+    
+    def sub_predict(self,X_data,return_std=True,have_y_data=False):
+        # This function makes predicitions for all the sub_models but doesn't do anything with them.
+        predictions = self.matching_data_struct()
+        # Assume matching data structure, containing tuples or lists containing X,y.
+        for ms_ft,sub_fts in self.sub_models.items():
+            for sub_ft,model in sub_fts.items():
+                if have_y_data:
+                    predictions[ms_ft][sub_ft] = model.predict(X_data[ms_ft][sub_ft][0],return_std=return_std)
+                else:
+                    predictions[ms_ft][sub_ft] = model.predict(X_data[ms_ft][sub_ft],return_std=return_std)
+        return predictions
+    
+    def predict(self,X,return_std=True):
+        # Here X is just an array.
+        f = np.empty((len(self.sub_models.keys()),X.shape[0]))
+        f_err = f.copy()
+        
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Process database in order to get all the microstructural data.
@@ -745,7 +876,7 @@ for fold_i in range(n_folds):
             gpr.fit(X,ml_data_dict[el][1][:,a])
             if v>2 and use_mixing:
                 print("Pseudo-element representation for model:")
-                get_mixing_vals(elements,gpr)
+                #get_mixing_vals(elements,gpr)
             sub_models[part_coeff_type] = gpr
         models[el] = sub_models
         if standardise_ht or standardise_comp:
