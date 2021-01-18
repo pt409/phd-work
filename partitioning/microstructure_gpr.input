@@ -1,6 +1,6 @@
 [DEFAULT]
 # Data details
-database = ../datasets/processing/processed_alloy_database_v4.csv
+database = ../datasets/processing/processed_alloy_database_v5.csv
 elements = Ni,Cr,Co,Re,Ru,Al,Ta,W,Ti,Mo
 # Size of feature vector and number of features that correspond to heat treatments
 feature_vector_size = 15

@@ -8,6 +8,7 @@ Created on Mon Mar 30 20:27:20 2020
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LinearRegression
 from mendeleev import element
 import sys
 
@@ -60,12 +61,16 @@ def calc_wt_at_vv(wt_comp,at_comp,masses):
 
 # Calculate the fraction of gamma' precipitate from the nominal, matrix and precipitate chemical compositions.
 def calc_prc_frac(nom,mtx,prc,error=0.01):
-    zero_vals = np.concatenate((np.nonzero(nom<=error)[0],np.nonzero(mtx<=error)[0],np.nonzero(prc<=error)[0]))
+    zero_vals = np.concatenate((np.nonzero(nom<error)[0],np.nonzero(mtx<error)[0],np.nonzero(prc<error)[0]))
     if zero_vals.size > 0:
         nom = np.delete(nom,zero_vals)
         mtx = np.delete(mtx,zero_vals)
         prc = np.delete(prc,zero_vals)
-    return 100*np.average((nom-mtx)/(prc-mtx),weights=nom)
+    # Use method from Segersall et al 2015 of fitting a linear regression model.
+    line = LinearRegression(fit_intercept=False)
+    line.fit((prc-mtx).reshape(-1,1),(nom-mtx).reshape(-1,1))
+    f = 100.*line.coef_[0,0]
+    return f
 
 def calc_part_coeff(mtx,prc,x_tol):
     K = np.full_like(mtx,np.nan)
@@ -111,7 +116,7 @@ def process_composition(index,row,return_codes=False,inf_value=1e3,x_tol=0.01,co
     at_frac = 1*vl_frac if vl_frac_rtn_code==2 and at_frac_rtn_code!=2 else at_frac    
     at_frac_rtn_code = min(at_frac_rtn_code*vl_frac_rtn_code,2)
     if nom_rtn_code:
-        # Case 2 and 3: have composition of the matrix phase and precipitate fracion but not the precipitate comp.
+        # Case 2 and 3: have composition of the matrix phase and precipitate fraction but not the precipitate comp.
         if mtx_rtn_code and (not prc_rtn_code):
             if wt_frac_rtn_code==2: # Case 2: have wt frac
                 prc_wt_comp = (nom_wt_comp-(1-0.01*wt_frac)*mtx_wt_comp)/(0.01*wt_frac)
