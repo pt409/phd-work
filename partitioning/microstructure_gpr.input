@@ -24,6 +24,8 @@ ht_kernel_1 = None
 # Grouping (i.e. rank of projection matrix, and position of 1s in matrix).
 projection_rank = 3
 projection_groups = 0,0,0,1,1,2,2,1,2,1
+# Options for the predictive model
+# Sub-models 
 # Output details, verbosity in ascending order, 0,1, or 2.
 verbosity = 1
 
@@ -37,6 +39,6 @@ comp_kernel_0 = L1RBFmixPr_comp
 comp_kernel_1 = L2RBF
 ht_kernel_0 = physRBF
 ht_kernel_1 = None
-kernel_noise = 0.07
+kernel_noise = 0.1
 projection_rank = 3
 projection_groups = 0,(0,2),0,(0,1),(0,1),2,2,(0,1),2,(0,1)

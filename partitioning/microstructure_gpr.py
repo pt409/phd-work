@@ -612,30 +612,35 @@ class sub_model():
         self.train_X = X
         self.train_y = y
     
-    def predict(self,X,return_std=True):
+    def predict(self,X,return_std=True,log_y=True):
         if self.fitted_flag:
-            if scaler:
+            if self.scaler:
                 X = self.scaler.transform(X)
-                if return_std:
-                    y,y_err = self.gpr.predict(X,return_std=return_std)
-                    if is_element:
-                        y = np.where(X[:,self.is_element]==0.0,np.nan,y)
-                        y_err = np.where(X[:,self.is_element]==0.0,np.inf,y_err)
-                    return y,y_err
-                else:
-                    y = gpr.predict(X,return_std=return_std)
-                    if is_element:
-                        y = np.where(X[:,self.is_element]==0.0,np.nan,y)
-                    return y
+            if return_std:
+                y,y_std = self.gpr.predict(X,return_std=return_std)
+                if log_y:
+                    y = np.exp(y)
+                    y_std *= y
+                if self.is_element:
+                    y = np.where(X[:,self.is_element]==0.0,np.nan,y)
+                    y_std = np.where(X[:,self.is_element]==0.0,np.inf,y_std)
+                return y,y_std
+            else:
+                y = gpr.predict(X,return_std=return_std)
+                if log_y:
+                    y = np.exp(y)
+                if self.is_element:
+                    y = np.where(X[:,self.is_element]==0.0,np.nan,y)
+                return y
         else: raise ValueError(
             "Model has not yet been fitted.")
         
     # Function to print mixing values from a fitted kernel
     def get_mixing_vals(self,elements):
-        all_params = self.gpr_model.kernel_.get_params()
+        all_params = self.gpr.kernel_.get_params()
         for param_name,param_value in all_params.items():
             if "mix_vals" in param_name:
-                kernel_component = self.gpr_model.kernel_
+                kernel_component = self.gpr.kernel_
                 for word in param_name.split("__"):
                     if "k1" in word:
                         kernel_component = kernel_component.k1
@@ -687,6 +692,8 @@ class model():
             # Pass this value to sub_model to work out which elements to exclude in prediction.
             if ind>0: # Assume base element is always included.
                 element_ind = ind - len(elements)
+            else:
+                element_ind = False
             for phase in range(self.phases):
                 part_coeff_name = "nom:{:}".format(phase+1) if phase==0 else "{:}:{:}".format(phase,phase+1)
                 self.sub_models[el][part_coeff_name] = sub_model(gpr,scaler,element_ind)
@@ -715,40 +722,70 @@ class model():
                 # Print some output from the model.
                 if verbosity >= 1:
                     print("Fitting model for "+ms_ft+" phase "+sub_ft+" feature...")
-                    if verbosity >= 2 and mixing:
+                    if verbosity >= 2 and self.mixing:
                         print("Pseudo-element representation for model:")
                         model.get_mixing_vals(self.elements)
                     print(100*"-")
     
-    def sub_predict(self,X_data,return_std=True,have_y_data=False):
+    def sub_predict(self,X_data,
+                    data_structured=True,log_y=True,
+                    return_std=True,have_y_data=False):
         # This function makes predicitions for all the sub_models but doesn't do anything with them.
         predictions = self.matching_data_struct()
-        # Assume matching data structure, containing tuples or lists containing X,y.
+        # Assume matching data structure, containing tuples or lists containing X,y, or just X, if data is structured.
         for ms_ft,sub_fts in self.sub_models.items():
-            for sub_ft,model in sub_fts.items():
-                if have_y_data:
-                    predictions[ms_ft][sub_ft] = model.predict(X_data[ms_ft][sub_ft][0],return_std=return_std)
+            for sub_ft,sub_model in sub_fts.items():
+                if have_y_data and data_structured:
+                    predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft][0],
+                                                                   return_std=return_std,log_y=log_y)
+                elif data_structured:
+                    predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft],
+                                                                   return_std=return_std,log_y=log_y)
                 else:
-                    predictions[ms_ft][sub_ft] = model.predict(X_data[ms_ft][sub_ft],return_std=return_std)
+                    predictions[ms_ft][sub_ft] = sub_model.predict(X_data,
+                                                                   return_std=return_std,log_y=log_y)
         return predictions
     
-    def predict(self,X,return_std=True):
-        # Here X is just an array.
-        f = np.empty((len(self.sub_models.keys()),X.shape[0]))
-        f_err = f.copy()
-        
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-# Process database in order to get all the microstructural data.
-ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht),shuffle_seed=seed)
-# Split into train and test datasets.
-N = ms_df.shape[0]
-f_t_kfolds = np.array([])
-f_best_kfolds = np.array([])
-f_errs_kfolds = np.array([])
-best_models_kfolds = np.array([])
-f_all_kfolds = np.empty([n_els+1,0])
-
+    # Currently this only handles two phases alloys.
+    def predict(self,X,return_std=True,log_y=True):
+        # Here X should be just an array.
+        # x is composition part of X
+        x = np.zeros((X.shape[0],len(self.elements)))
+        x[:,1:] = X[:,self.comp_range[0]:self.comp_range[1]]
+        x[:,0]  = 1.-x.sum(axis=1)
+        # Different f models are stored for comparison
+        f_all = np.empty((len(self.sub_models.keys()),X.shape[0]))
+        f_std = f_all.copy()
+        # Predicitions for each sub-component of the microstrucutre using gpr model.
+        sub_predictions = self.sub_predict(X,data_structured=False,return_std=True,log_y=True)
+        f_0,f_std_0 = sub_predictions["f"]["f1"]
+        f_all[0,:] = f_0
+        f_std[0,:] = f_std_0
+        # Calculate microstructural features for each alloy, and associated errors.
+        for i,el in enumerate(self.elements):
+            K1,K1_std = sub_predictions[el]["nom:1"]
+            K2,K2_std = sub_predictions[el]["1:2"]
+            # Calculate fraction according to this model.
+            f_i = (K2-K1)/(1.-K1)
+            f_i_std = np.sqrt(((K2-1.)*K1_std)**2+((K1-1.)*K2_std)**2)/(1.-K1)**2
+            f_all[i+1,:] = f_i
+            f_std[i+1,:] = f_i_std
+            # Calculate x_i_prc according to 1st part. coeff. model
+            x_i = x[:,i]
+            x_i_prc_mod1 = x_i/np.abs(f_0+(1.-f_0)*K1)
+            x_i_std_mod1 = np.sqrt(((1.-K1)*f_std_0)**2 + ((1.-f_std_0)*K1_std)**2)*x_i_prc_mod1**2/x_i
+            # Calculate x_i_prc according to 2nd part. coeff. model
+            x_i_prc_mod2 = x_i/K2
+            x_i_std_mod2 = (x_i/K2**2)*K2_std
+        # Now choose best model for precipitate fraction
+        f_std_frac = np.abs(f_std/f_all) # use fractional error
+        best_locs = np.where(f_std_frac == np.nanmin(f_std_frac,axis=0))
+        best_locs = (best_locs[0][best_locs[1].argsort()],np.sort(best_locs[1]))
+        best_models = best_locs[0] # Store which models were best for which data points.
+        f_best = f_all[best_locs]
+        f_best_std = f_std[best_locs] # Want absolute errors here
+        return f_best,f_best_std,best_models
+                    
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% KERNEL SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
 # Sets up kernel using settings in config file
@@ -799,6 +836,18 @@ else:
     print("Kernel has been misdefined in config file.")
 kernel *= ConstantKernel()
 
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+# Process database in order to get all the microstructural data.
+ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht),shuffle_seed=seed)
+# Split into train and test datasets.
+N = ms_df.shape[0]
+f_true_kfolds = np.array([])
+f_pred_kfolds = np.array([])
+f_stds_kfolds = np.array([])
+best_models_kfolds = np.array([])
+f_all_kfolds = np.empty([n_els+1,0])
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% K-FOLDS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 for fold_i in range(n_folds):
@@ -807,155 +856,81 @@ for fold_i in range(n_folds):
         N_train = N - N_test
         train_df = pd.concat([ms_df.iloc[(fold_i+1)*N_test:,:],ms_df.iloc[:fold_i*N_test,:]])
         test_df  = ms_df.iloc[fold_i*N_test:(fold_i+1)*N_test,:]
-        #opt_models_pkl = ".".join([x+y for x,y in zip(opt_models_pkl_0.split("."),["_{:}".format(fold_i),""])])
-        print("---------------------------------------------------\nBEGINNING FIT TO TRAINING DATA SELECTION {:}\n---------------------------------------------------\n".format(fold_i))
+        print("\n"+100*"-")
+        print(29*"-"+"BEGINNING FIT TO TRAINING DATA SELECTION {:}".format(fold_i)+29*"-")
+        print(100*"-"+"\n")
     else:
         N_train = int(np.rint(N*(1.-test_frac)))
         train_df = ms_df.iloc[:N_train,:]
         test_df  = ms_df.iloc[N_train:,:]
-        #opt_models_pkl = opt_models_pkl_0
-    
-    output_head = "        \t"+"       \t".join(elements)+"\n"
-    
-    # Process all the data from a database:
-    def process_all_data(df): 
-        # Get all the data for precipitate fraction and g/g' partitioning coeff. 
-        # Store as tuples in a dict for fast access.
-        ml_data_dict = {}
-        for el in elements:
-            part_coeff_header = [("γ/γ’ partitioning ratio","at. %",el),("Composition","at. %",el),("γ’ composition","at. %",el)]
-            if not part_coeff_header[0] in df:
-                part_coeff_header = [("γ/γ’ partitioning ratio","at. %",el+" "),("Composition","at. %",el+" "),("γ’ composition","at. %",el+" ")] # In case there's a space after the element name in the database.
-            x,y = get_Xy(df,part_coeff_header,min_max=[0.0,None],ht=incl_ht)
-            ml_data_dict[el] = (x,np.log(np.c_[y[:,0],y[:,1]/y[:,2]]))
-        #ml_data_dict["f"] = get_Xy(df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
-        f_data = get_Xy(df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
-        # output_head = "        \t"+"       \t".join(elements + ["f"]) # Holdover from when krr model was used for f
-        
-        # Target data
-        #X_ms = ml_data_dict["f"][0]
-        X_ms = f_data[0]
-        x_comp = 0.01*(df.loc[:,("Composition","at. %")]).drop(["Ni","Hf","Nb"],axis=1).astype(np.float64).values
-        x_comp_full = np.c_[1.0-x_comp.sum(axis=1),x_comp]
-        x_prc_target = 0.01*(df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
-        #f = ml_data_dict["f"][1].reshape(-1,1)
-        f = 0.01*f_data[1].reshape(-1,1)
-        return ml_data_dict, f_data, X_ms, x_comp, x_comp_full, x_prc_target, f
-    
-    # Split into test/training datasets
-    ml_data_dict,  f_data,  X_ms,  x_comp,  x_comp_full,  x_prc_target,  f   = process_all_data(train_df)
-    ml_data_dict_t,f_data_t,X_ms_t,x_comp_t,x_comp_full_t,x_prc_target_t,f_t = process_all_data(test_df)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL FITTING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    # FITTING PROCEDURE            
-    # Stored models...
-    models = {}
-    scalers = {}
-    # Learn partitioning coefficients models for each element and part. coeff.
+    # FITTING PROCEDURE 
+    model_k = model(elements,kernel,alpha_noise,seed,
+                    standardise_comp,standardise_ht,comp_range,ht_range,
+                    kernel_pr_mixing=use_mixing)
+    # Get the test/training data
+    ml_data_dict = model_k.matching_data_struct()
+    ml_data_dict_t = deepcopy(ml_data_dict) # To store the test data.
     for el in elements:
-        X = ml_data_dict[el][0]
-        if standardise_ht and standardise_comp:
-            scaler = PartScaler(with_mean=False)
-            X = scaler.fit_transform(X)
-        elif standardise_ht:
-            scaler = PartScaler(ht_range,with_mean=False)
-            X = scaler.fit_transform(X)
-        elif standardise_comp:
-            scaler = PartScaler(comp_range,with_mean=False)
-            X = scaler.fit_transform(X)
-        sub_models = {}
-        for a,part_coeff_type in enumerate(["1:2","nom:2"]):
-            gpr = GaussianProcessRegressor(kernel=kernel,
-                                           normalize_y=True,
-                                           random_state=seed,
-                                           alpha=alpha_noise,
-                                           n_restarts_optimizer=2)
-            if v>1:
-                print("Fitting model for "+el+" phase "+part_coeff_type+" partitioning coefficient...")
-            gpr.fit(X,ml_data_dict[el][1][:,a])
-            if v>2 and use_mixing:
-                print("Pseudo-element representation for model:")
-                #get_mixing_vals(elements,gpr)
-            sub_models[part_coeff_type] = gpr
-        models[el] = sub_models
-        if standardise_ht or standardise_comp:
-            scalers[el] = scaler
-    # Repeat for precipitate fraction
-    X = f_data[0]
-    if standardise_ht and standardise_comp:
-        scaler = PartScaler(with_mean=False)
-        X = scaler.fit_transform(X)
-    elif standardise_ht:
-        scaler = PartScaler(ht_range,with_mean=False)
-        X = scaler.fit_transform(X)
-    elif standardise_comp:
-        scaler = PartScaler(comp_range,with_mean=False)
-        X = scaler.fit_transform(X)
-    f_fit = np.log(0.01*f_data[1])
-    gpr = GaussianProcessRegressor(kernel=kernel,
-                                   normalize_y=True,
-                                   random_state=seed,
-                                   alpha=alpha_noise,
-                                   n_restarts_optimizer=2)
-    if v>1:
-        print("Fitting model for phase fraction f.")
-    gpr.fit(X,f_fit)
-    models["f"] = gpr
-    if standardise_ht or standardise_comp:
-        scalers["f"] = scaler
+        part_coeff_header = [("γ/γ’ partitioning ratio","at. %",el),("Composition","at. %",el),("γ’ composition","at. %",el)]
+        # Get training data:
+        x,y = get_Xy(train_df,part_coeff_header,min_max=[0.0,None],ht=incl_ht)
+        ml_data_dict[el]["nom:1"] = (x,np.log(y[:,0]))
+        ml_data_dict[el]["1:2"] = (x,np.log(y[:,1]/y[:,2]))
+        # Get test data
+        x,y = get_Xy(test_df,part_coeff_header,min_max=[0.0,None],ht=incl_ht)
+        ml_data_dict_t[el]["nom:1"] = (x,y[:,0])
+        ml_data_dict_t[el]["1:2"] = (x,y[:,1]/y[:,2])
+        x_prc_target = 0.01*(test_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
+    # Get training data for f
+    x,y = get_Xy(train_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
+    ml_data_dict["f"]["f1"] = (x,np.log(0.01*y))
+    # Get test data for f
+    x,y = get_Xy(test_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
+    ml_data_dict_t["f"]["f1"] = (x,0.01*y)
+    # Test data used to make predictions on/against:
+    X_ms_t = x.copy()
+    x_prc_target_t = 0.01*(test_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
     
-    # Work out fractions for test data set.
-    f_all = []
-    f_err_all = []
-    # Uncertainties for fractions calculated from part. coeffs.
-    for el in elements:
-        if standardise_ht or standardise_comp:
-            X = scalers[el].transform(X_ms_t)
-        else:
-            X = X_ms_t.copy()
-        K1,K_err1 = models[el]["1:2"].predict(X,return_std=True)
-        K2,K_err2 = models[el]["nom:2"].predict(X,return_std=True)
-        f_ = (np.exp(K2)-np.exp(K1))/(1-np.exp(K1))
-        f_err = ((np.exp(K2)/(1-np.exp(K1)))**2 * K_err1**2 + (np.exp(K1)*(-1+np.exp(K2))/(1-np.exp(K1)**2))**2 * K_err2**2)**0.5
-        f_all += [f_]
-        f_err_all += [f_err]
-    # Uncertainty for fraction calculated directly.
-    if standardise_ht or standardise_comp:
-        X = scalers["f"].transform(X_ms_t)
-    else:
-        X = X_ms_t.copy()
-    f_d,f_err_d = models["f"].predict(X,return_std=True)
-    # Have model of log(f) - convert to f
-    f_d = np.exp(f_d)
-    f_err_d = f_d*f_err_d
-    f_all += [f_d]
-    f_err_all += [f_err_d]
-    # Find smallest Uncertainty model
-    # Exlcude models from elements not present in that particular alloy.
-    excl_M1 = np.append(np.where(x_comp_full_t.T==0.0,np.inf,0),np.array([np.zeros(x_comp_full_t.shape[0])]),axis=0)
-    excl_M2 = np.append(np.where(x_comp_full_t.T==0.0,np.nan,1),np.array([np.ones(x_comp_full_t.shape[0])]),axis=0)
-    f_all = np.array(f_all)*excl_M2
-    f_err_all = np.abs(np.array(f_err_all))
-    # Locate the best uncertainties to use.
-    best_locs = np.where(f_err_all == np.nanmin(f_err_all+excl_M1,axis=0))
-    best_locs = (best_locs[0][best_locs[1].argsort()],np.sort(best_locs[1]))
-    best_models = best_locs[0] # Store which models were best for which data points on this fold.
-    f_best = f_all[best_locs]
-    f_best_errs = f_err_all[best_locs] # Want absolute errors here.
-    print("\nR^2 score for fold {:} = {:5f}".format(fold_i,r2_score(f_t,f_best)))
+    # Fit model
+    model_k.fit_sub_models(ml_data_dict,verbosity=v)
+    # Make f predicitions for model.
+    f_pred_t,f_std_t,models_t = model_k.predict(X_ms_t)
+    
+    # Analyse and store results on test data for this fold.
+    f_true = ml_data_dict_t["f"]["f1"][1]
+    if v>=1:
+        print("\nPhase fraction R^2 score for fold {:} = {:5f}".format(fold_i,r2_score(f_true,f_pred_t)))
     # Things we're interested in for all k-folds.
-    f_all_kfolds = np.append(f_all_kfolds,f_all,axis=1)
-    f_t_kfolds = np.append(f_t_kfolds,f_t)
-    f_best_kfolds = np.append(f_best_kfolds,f_best)
-    best_models_kfolds = np.append(best_models_kfolds,best_models)
-    f_errs_kfolds = np.append(f_errs_kfolds,f_best_errs)
+    f_true_kfolds = np.append(f_true_kfolds,f_true)
+    f_pred_kfolds = np.append(f_pred_kfolds,f_pred_t)
+    best_models_kfolds = np.append(best_models_kfolds,models_t)
+    f_stds_kfolds = np.append(f_stds_kfolds,f_std_t)
+    
 # Some final output
 print("\n\n---------------------------------------------------")
-f_comm_t_kfolds = f_t_kfolds[(f_t_kfolds>=0.55) & (f_t_kfolds<=0.85)]
-f_comm_best_kfolds = f_best_kfolds[(f_t_kfolds>=0.55) & (f_t_kfolds<=0.85)]
-print("\nOverall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_t_kfolds,f_best_kfolds)))
-print("Overall R^2 score for commercial alloys only = {:5f}".format(r2_score(f_comm_t_kfolds,f_comm_best_kfolds)))
-print("Pearson's r for commercial alloys only = {:5f}".format(pearsonr(f_comm_t_kfolds,f_comm_best_kfolds)[0]))
+f_comm_true_kfolds = f_true_kfolds[(f_true_kfolds>=0.55) & (f_true_kfolds<=0.85)]
+f_comm_pred_kfolds = f_pred_kfolds[(f_true_kfolds>=0.55) & (f_true_kfolds<=0.85)]
+print("\nOverall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_true_kfolds,f_pred_kfolds)))
+print("Overall R^2 score for commercial alloys only = {:5f}".format(r2_score(f_comm_true_kfolds,f_comm_pred_kfolds)))
+print("Pearson's r for commercial alloys only = {:5f}".format(pearsonr(f_comm_true_kfolds,f_comm_pred_kfolds)[0]))
 # Use to get colours for different models for each datapt, e.g. for plotting 
 model_colours = np.array(list(map({n:i for i,n in enumerate(set(best_models_kfolds))}.get,best_models_kfolds)))
+
+# Function to plot results
+def plot_f_byModel(f_true,f_pred,f_stds,
+                   lims=None):
+    fig,axs=plt.subplots()
+    plt.errorbar(f_true,f_pred,yerr=f_stds,fmt=".",ecolor="k",elinewidth=0.5,zorder=0)
+    sc = plt.scatter(f_true,f_pred,marker=".",c=model_colours,cmap="brg",zorder=10)
+    if lims==None:
+        lims = [min(axs.get_xlim()+axs.get_ylim()),max(axs.get_xlim()+axs.get_ylim())]
+    axs.set_xlim(lims)
+    axs.set_ylim(lims)
+    axs.plot(lims,lims,"--k")
+    axs.set_aspect("equal","box")
+    axs.set_xlabel("Actual precipitate fraction")
+    axs.set_ylabel("Predicted precipitate fraction")
+    return fig,axs
