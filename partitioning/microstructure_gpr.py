@@ -695,7 +695,7 @@ class model():
             self.sub_models[el] = {}
             # Pass this value to sub_model to work out which elements to exclude in prediction.
             if ind>0: # Assume base element is always included.
-                element_ind = ind - len(elements)
+                element_ind = ind - len(self.elements)
             else:
                 element_ind = False
             for phase in range(self.phases):
@@ -764,7 +764,7 @@ class model():
         return predictions
     
     # Currently this only handles two phases alloys.
-    def predict(self,X,return_std=True,log_y=True):
+    def predict_legacy(self,X,return_std=True,log_y=True):
         # Here X should be just an array.
         # x is composition part of X
         N = X.shape[0]
@@ -805,7 +805,7 @@ class model():
         f_best_std = f_std[best_locs] # Want absolute errors here
         return f_best,f_best_std,best_models
     
-    def Predict(self,X,lambda_=0.0):
+    def predict(self,X,lambda_=0.0):
         # Here X should be just an array.
         # x is composition part of X
         N = X.shape[0]
@@ -845,88 +845,7 @@ class model():
         f = f_codes*f_calc + (~f_codes)*f_dir
         model_codes = np.array([f_codes,calc_j_1,calc_j_2]).T
         return f,f_std,x_1,x_1_std,x_2,x_2_std,model_codes
-            
-    def predict_(self,X):
-        # Here X should be just an array.
-        # x is composition part of X
-        N = X.shape[0]
-        x = np.zeros((N,len(self.elements)))
-        x[:,1:] = X[:,self.comp_range[0]:self.comp_range[1]]
-        x[:,0]  = 1.-x.sum(axis=1)
-        # Predicitions for each sub-component of the microstrucutre using gpr model.
-        sub = self.sub_predict(X,data_structured=False,return_std=True,log_y=True)
-        # Certain values that will keep coming up in calc.
-        f_dir = sub["f1"]["val"]
-        f_dir_std = sub["f1"]["std"]
-        # Phase 1 is the gamma' phase, phase 2 is the gamma phase.
-        x_1 = x/sub["nom:1"]["val"]
-        x_2 = x_1*sub["1:2"]["val"]
-        # Note these are fractional errors
-        x_1_stdf = sub["nom:1"]["std"]
-        x_2_stdf = np.sqrt(sub["nom:1"]["std"]**2+sub["1:2"]["std"]**2)
-        x_1_std  = x_1_stdf*x_1
-        x_2_std  = x_2_stdf*x_2
-        # Things to calculate in ugly for-loop below.
-        x_1_sumto1 = np.empty_like(x_1)
-        x_2_sumto1 = np.empty_like(x_2)
-        x_1_sumto1_std = np.empty_like(x_1_std)
-        x_2_sumto1_std = np.empty_like(x_2_std)
-        model_codes = np.empty((N,3),dtype=int)
-        f_opt = f_dir.copy()
-        f_opt_std = f_dir_std.copy()
-        # Yes this SHOULD all be vectorised.
-        for a,(x_a,x_1_a,x_2_a,x_1_std_a,x_2_std_a,x_1_stdf_a,x_2_stdf_a) in enumerate(zip(x,x_1,x_2,x_1_std,x_2_std,x_1_stdf,x_2_stdf)):
-            best_cal_dist_1 = np.inf
-            best_cal_dist_2 = np.inf
-            for j,el in enumerate(self.elements):
-                if x_a[j] > 0.0:
-                    # Calculated elements for each phase
-                    x_1_aj = 1. - np.nansum(x_1_a[:j]) - np.nansum(x_1_a[j+1:])
-                    x_2_aj = 1. - np.nansum(x_2_a[:j]) - np.nansum(x_2_a[j+1:])
-                    if x_1_aj >= 0.0:
-                        # Error in the "calculated" element.
-                        x_1_std_sq_aj = np.nansum(x_1_std_a[:j]**2) + np.nansum(x_1_std_a[j+1:]**2)
-                        # Average error for this model:
-                        #avg_x_1_std_aj = np.nansum(x_1_stdf_a[:j]**2) + np.nansum(x_1_stdf_a[j+1:]**2) \
-                        #    + x_1_std_sq_aj/x_1_aj**2 
-                        cal_dist_1 = (x_1_aj - x_1_a[j])/x_1_std_a[j]
-                        # Keep if best uncertainity.
-                        if cal_dist_1 < best_cal_dist_1:
-                            best_model_1 = j
-                            best_cal_dist_1 = cal_dist_1
-                            best_comp_1 = x_1_a.copy() ; best_comp_1[j] = x_1_aj
-                            best_std_1  = x_1_std_a.copy() ; best_std_1[j] = np.sqrt(x_1_std_sq_aj)
-                    if x_2_aj >= 0.0:
-                        # Error in the "calculated" element.
-                        x_2_std_sq_aj = np.nansum(x_2_std_a[:j]**2) + np.nansum(x_2_std_a[j+1:]**2)
-                        # Average error for this model:
-                        #avg_x_2_std_aj = np.nansum(x_2_stdf_a[:j]**2) + np.nansum(x_2_stdf_a[j+1:]**2) \
-                        #    + x_2_std_sq_aj/x_2_aj**2 
-                        cal_dist_2 = (x_2_aj - x_2_a[j])/x_2_std_a[j]
-                        if cal_dist_2 < best_cal_dist_2:
-                            best_model_2 = j
-                            best_cal_dist_2 = cal_dist_2
-                            best_comp_2 = x_2_a.copy() ; best_comp_2[j] = x_2_aj
-                            best_std_2  = x_2_std_a.copy() ; best_std_2[j] = np.sqrt(x_2_std_sq_aj)
-            # Store optimal models found, calculate f
-            f_cal = np.nansum((x_a-best_comp_2)*(best_comp_1-best_comp_2))/np.nansum((best_comp_1-best_comp_2)**2)
-            f_cal_std = np.sqrt(np.nansum(((2.*f_cal-1.)*best_comp_1+2.*(1.-f_cal)*best_comp_2-x_a)**2*best_std_2**2 +\
-                                      (x_a+(2.*f_cal-1.)*best_comp_2-2.*f_cal*best_comp_1)**2*best_std_1**2)) \
-                /np.abs(np.nansum((x_a-best_comp_2)*(best_comp_1-best_comp_2))) # fractional error
-            if f_cal_std < f_dir_std[a,0]:
-                f_opt[a,0] = f_cal
-                f_opt_std[a,0] = f_cal_std
-                model_codes[a] = np.array([1,best_model_1,best_model_2])
-            else:
-                model_codes[a] = np.array([0,best_model_1,best_model_2])
-            x_1_sumto1[a] = best_comp_1 ; x_1_sumto1_std[a] = best_std_1
-            x_2_sumto1[a] = best_comp_2 ; x_2_sumto1_std[a] = best_std_2
-        # Return fractional errors in composition to be consistent
-        x_1_sumto1_std /= x_1_sumto1
-        x_2_sumto1_std /= x_2_sumto1_std
-        return x_1_sumto1,x_1_sumto1_std,x_2_sumto1,x_2_sumto1_std,f_opt,f_opt_std,model_codes
-            
-                    
+                                
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% KERNEL SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
 # Sets up kernel using settings in config file
@@ -981,16 +900,19 @@ kernel *= ConstantKernel()
 
 # Process database in order to get all the microstructural data.
 ms_df = get_microstructure_data(df,drop_duplicate_comps=(not incl_ht),shuffle_seed=seed)
-# Split into train and test datasets.
-N = ms_df.shape[0]
-f_true_kfolds = np.array([])
-f_pred_kfolds = np.array([])
-f_stds_kfolds = np.array([])
-best_models_kfolds = np.array([])
-f_all_kfolds = np.empty([n_els+1,0])
+
+f_true_kfolds = np.array([]) ; f_pred_kfolds = np.array([]) ; f_stds_kfolds = np.array([])
+x_prc_true_kfolds = np.array([]).reshape((-1,n_els)) ; x_prc_pred_kfolds = np.array([]).reshape((-1,n_els)) ; x_prc_std_kfolds = np.array([]).reshape((-1,n_els))
+x_mtx_true_kfolds = np.array([]).reshape((-1,n_els)) ; x_mtx_pred_kfolds = np.array([]).reshape((-1,n_els)) ; x_mtx_std_kfolds = np.array([]).reshape((-1,n_els))
+#x_kfolds = np.array([]).reshape((-1,n_els))
+model_codes_kfolds = np.array([],dtype=int).reshape((-1,3))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% K-FOLDS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+# Split into train and test datasets.
+N = ms_df.shape[0]
+
+n_folds = n_folds*n_fold_testing + (not n_fold_testing)
 for fold_i in range(n_folds):
     if n_fold_testing:
         N_test = N//n_folds
@@ -1004,7 +926,7 @@ for fold_i in range(n_folds):
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL FITTING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    # FITTING PROCEDURE 
+    # Setup model 
     model_k = model(elements,kernel,alpha_noise,seed,
                     standardise_comp,standardise_ht,comp_range,ht_range,
                     kernel_pr_mixing=use_mixing)
@@ -1031,35 +953,92 @@ for fold_i in range(n_folds):
     X_ms_t = x.copy()
     x_prc_target_t = 0.01*(test_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
     x_mtx_target_t = 0.01*(test_df.loc[:,("γ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
+    names_t = test_df.loc[:,"Name"].values.reshape(-1)
     
     print("\n"+120*"-")
-    print(40*"-"+"BEGINNING FIT TO TRAINING DATA FOLD k={:}".format(fold_i)+40*"-")
+    if n_folds>1:
+        print(40*"-"+"BEGINNING FIT TO TRAINING DATA FOLD k={:}".format(fold_i)+40*"-")
+    else:
+        print(45*"-"+"BEGINNING FIT TO TRAINING DATA"+45*"-")
     print(120*"-"+"\n")
     # Fit model
     model_k.fit_sub_models(ml_data_dict,verbosity=v)
     # Make f predicitions for model.
-    f_pred_t,f_std_t,models_t = model_k.predict(X_ms_t)
+    f_pred,f_pred_std,x_1,x_1_std,x_2,x_2_std,model_codes=model_k.predict(X_ms_t)
     
     # Analyse and store results on test data for this fold.
     f_true = ml_data_dict_t["f"]["f1"][1]
-    if v>=1:
-        print("\nPhase fraction R^2 score for fold {:} = {:5f}".format(fold_i,r2_score(f_true,f_pred_t)))
+    if v<1:
+        print("\nPhase fraction R^2 score for fold {:} = {:5f}".format(fold_i,r2_score(f_true,f_pred)))
+    else:
+        r2_prc = 1.-np.nansum((x_1-x_prc_target_t)**2,axis=0)\
+            /np.nansum((np.nanmean(np.isnan(x_1)*x_1+x_prc_target_t,axis=0)-x_prc_target_t)**2,axis=0)
+        r2_mtx = 1.-np.nansum((x_2-x_mtx_target_t)**2,axis=0)\
+            /np.nansum((np.nanmean(np.isnan(x_2)*x_2+x_mtx_target_t,axis=0)-x_mtx_target_t)**2,axis=0)
+        print("\nR^2 for microstructural features:\n"+(n_els+2)*8*"-")
+        print("    \t"+"    \t".join(elements)+"    \tf\n"+(n_els+2)*8*"-")
+        print("γ’ |\t"+"\t".join(map("{:.4f}".format,r2_prc))+"\t{:.4f}".format(r2_score(f_true,f_pred)))
+        print("γ  |\t"+"\t".join(map("{:.4f}".format,r2_mtx))+"\t-")
+        print((n_els+2)*8*"-")
+    if v>=2:
+        print("\nPredicted compositions in test data set:\n"+(n_els+3)*9*"-")
+        print("     \t      \t      \t"+"    \t".join(elements)+"   \tf\n"+(n_els+3)*9*"-")
+        for name,x_1_true,x_1_pred,x_2_true,x_2_pred,f_true_a,f_pred_a in zip(names_t,x_prc_target_t,x_1,x_mtx_target_t,x_2,f_true,f_pred):
+            print(name[:5]    +(5-len(name[:5]))   *" "+"\t| γ’ |\tTrue |\t"+"\t".join(map("{:.3f}".format,np.nan_to_num(x_1_true)))+"\t{:.3f}".format(f_true_a))
+            print(name[5:10]  +(5-len(name[5:10])) *" "+"\t|    |\tPred |\t"+"\t".join(map("{:.3f}".format,np.nan_to_num(x_1_pred)))+"\t{:.3f}".format(f_pred_a))
+            print(name[10:15] +(5-len(name[10:15]))*" "+"\t| γ  |\tTrue |\t"+"\t".join(map("{:.3f}".format,np.nan_to_num(x_2_true)))+"\t-")
+            print(name[15:20] +(5-len(name[15:20]))*" "+"\t|    |\tPred |\t"+"\t".join(map("{:.3f}".format,np.nan_to_num(x_2_pred)))+"\t-")
+            print((n_els+3)*9//2*". ")
+        print((n_els+3)*9*"-")
     # Things we're interested in for all k-folds.
-    f_true_kfolds = np.append(f_true_kfolds,f_true)
-    f_pred_kfolds = np.append(f_pred_kfolds,f_pred_t)
-    best_models_kfolds = np.append(best_models_kfolds,models_t)
-    f_stds_kfolds = np.append(f_stds_kfolds,f_std_t)
+    f_true_kfolds = np.concatenate((f_true_kfolds,f_true)) ; f_pred_kfolds = np.concatenate((f_pred_kfolds,f_pred)) ; f_stds_kfolds = np.concatenate((f_stds_kfolds,f_pred_std))
+    x_prc_true_kfolds = np.concatenate((x_prc_true_kfolds,x_prc_target_t)) 
+    x_prc_pred_kfolds = np.concatenate((x_prc_pred_kfolds,x_1)) ; x_prc_std_kfolds = np.concatenate((x_prc_std_kfolds,x_1_std))
+    x_mtx_true_kfolds = np.concatenate((x_mtx_true_kfolds,x_mtx_target_t)) 
+    x_mtx_pred_kfolds = np.concatenate((x_mtx_pred_kfolds,x_2)) ; x_mtx_std_kfolds = np.concatenate((x_mtx_std_kfolds,x_2_std))
+    model_codes_kfolds = np.concatenate((model_codes_kfolds,model_codes))
     
-# Some final output
+#%% Final output
 print("\n"+120*"=")
-f_comm_true_kfolds = f_true_kfolds[(f_true_kfolds>=0.55) & (f_true_kfolds<=0.85)]
-f_comm_pred_kfolds = f_pred_kfolds[(f_true_kfolds>=0.55) & (f_true_kfolds<=0.85)]
-print("\nOverall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_true_kfolds,f_pred_kfolds)))
-print("Overall R^2 score for commercial alloys only = {:5f}".format(r2_score(f_comm_true_kfolds,f_comm_pred_kfolds)))
-print("Pearson's r for commercial alloys only = {:5f}".format(pearsonr(f_comm_true_kfolds,f_comm_pred_kfolds)[0]))
-# Use to get colours for different models for each datapt, e.g. for plotting 
-model_colours = np.array(list(map({n:i for i,n in enumerate(set(best_models_kfolds))}.get,best_models_kfolds)))
+print(52*"-"+"FITTING COMPLETE"+52*"-")
+print("\n"+120*"=")
+# Print some final output
+print("\nR^2 for microstructural features across all {:}-folds:".format(n_folds))
+r2_prc = 1.-np.nansum((x_prc_pred_kfolds-x_prc_true_kfolds)**2,axis=0)\
+            /np.nansum((np.nanmean(np.isnan(x_prc_pred_kfolds)*x_prc_pred_kfolds+x_prc_true_kfolds,axis=0)-x_prc_true_kfolds)**2,axis=0)
+r2_mtx = 1.-np.nansum((x_mtx_pred_kfolds-x_mtx_true_kfolds)**2,axis=0)\
+            /np.nansum((np.nanmean(np.isnan(x_mtx_pred_kfolds)*x_mtx_pred_kfolds+x_mtx_true_kfolds,axis=0)-x_mtx_true_kfolds)**2,axis=0)
+print("\nR^2 for microstructural features:\n"+(n_els+2)*8*"-")
+print("    \t"+"    \t".join(elements)+"    \tf\n"+(n_els+2)*8*"-")
+print("γ’ |\t"+"\t".join(map("{:.4f}".format,r2_prc))+"\t{:.4f}".format(r2_score(f_true_kfolds,f_pred_kfolds)))
+print("γ  |\t"+"\t".join(map("{:.4f}".format,r2_mtx))+"\t-")
 
+#%% Commercial alloys
+comm_alloys = (f_true_kfolds>=0.55) & (f_true_kfolds<=0.85)
+f_comm_true = f_true_kfolds[comm_alloys] ; f_comm_stds = f_stds_kfolds[comm_alloys]
+f_comm_pred = f_pred_kfolds[comm_alloys]
+x_prc_comm_true = x_prc_true_kfolds[comm_alloys]
+x_prc_comm_pred = x_prc_pred_kfolds[comm_alloys] ; x_prc_comm_stds = x_prc_std_kfolds[comm_alloys]
+x_mtx_comm_true = x_mtx_true_kfolds[comm_alloys]
+x_mtx_comm_pred = x_mtx_pred_kfolds[comm_alloys] ; x_mtx_comm_stds = x_mtx_std_kfolds[comm_alloys]
+# Commercial alloys output
+print((n_els*4-2)*"-"+"Commercial alloys only"+(n_els*4-2)*"-")
+r2_prc = 1.-np.nansum((x_prc_comm_pred-x_prc_comm_true)**2,axis=0)\
+            /np.nansum((np.nanmean(np.isnan(x_prc_comm_pred)*x_prc_comm_pred+x_prc_comm_true,axis=0)-x_prc_comm_true)**2,axis=0)
+r2_mtx = 1.-np.nansum((x_mtx_comm_pred-x_mtx_comm_true)**2,axis=0)\
+            /np.nansum((np.nanmean(np.isnan(x_mtx_comm_pred)*x_mtx_comm_pred+x_mtx_comm_true,axis=0)-x_mtx_comm_true)**2,axis=0)
+print("γ’ |\t"+"\t".join(map("{:.4f}".format,r2_prc))+"\t{:.4f}".format(r2_score(f_comm_true,f_comm_pred)))
+print("γ  |\t"+"\t".join(map("{:.4f}".format,r2_mtx))+"\t-")
+print((n_els+2)*8//2*" .")
+print("    \t"+(n_els-1)*"      \t"+"PCC  |\t{:.4f}".format(pearsonr(f_comm_true,f_comm_pred)[0]))
+print((n_els+2)*8*"-")
+print("Note: # commercial alloys = {:}".format(comm_alloys.sum()))
+# Use to get colours for different models for each datapt, e.g. for plotting 
+model_colours = np.array(list(
+    map({n.tobytes():i for i,n in enumerate(np.unique(model_codes_kfolds,axis=0))}.get,
+        map(np.ndarray.tobytes,model_codes_kfolds))))
+
+#%% Plotting stuff
 # Function to plot results
 def plot_f_byModel(f_true,f_pred,f_stds,
                    lims=None):

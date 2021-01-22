@@ -29,7 +29,7 @@ projection_groups = 0,0,0,1,1,2,2,1,2,1
 # Output details, verbosity in ascending order, 0,1, or 2.
 verbosity = 1
 
-[mixing]
+[test]
 n_fold_testing = true
 n_folds = 6
 seed = 2106
@@ -43,7 +43,7 @@ kernel_noise = 0.05
 projection_rank = 3
 projection_groups = 0,(0,2),0,(0,1),(0,1),2,2,(0,1),2,(0,1)
 
-[test]
+[debug]
 test_pc = 10.0
 standardise_ht = false
 verbosity = 3
