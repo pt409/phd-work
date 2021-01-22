@@ -1,4 +1,6 @@
 [DEFAULT]
+# Whether or not to save model(s)
+save = True
 # Data details
 database = ../datasets/processing/processed_alloy_database_v5.csv
 elements = Ni,Cr,Co,Re,Ru,Al,Ta,W,Ti,Mo
@@ -30,20 +32,22 @@ projection_groups = 0,0,0,1,1,2,2,1,2,1
 verbosity = 1
 
 [test]
+save = False
 n_fold_testing = true
 n_folds = 6
 seed = 2106
 standardise_ht = false
-verbosity = 3
+verbosity = 2
 comp_kernel_0 = L1RBFmixPr_comp
 comp_kernel_1 = L2RBF
 ht_kernel_0 = physRBF
 ht_kernel_1 = None
-kernel_noise = 0.05
+kernel_noise = 0.08
 projection_rank = 3
-projection_groups = 0,(0,2),0,(0,1),(0,1),2,2,(0,1),2,(0,1)
+projection_groups = 0,(0,2),(0,1),(0,1),(0,1),2,2,(0,1),2,(0,1)
 
 [debug]
+save = False
 test_pc = 10.0
 standardise_ht = false
 verbosity = 3

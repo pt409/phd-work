@@ -8,7 +8,8 @@ Created on Mon Jun  1 15:44:29 2020
 
 import numpy as np
 import pandas as pd
-#import pickle
+import pickle
+import warnings
 
 from sklearn.metrics import r2_score
 from scipy.stats import pearsonr
@@ -59,6 +60,7 @@ my_config = config[config_type]
 # Read config file in:
 incl_ht = True # Always include ht in this version of the code.
 #opt_models_pkl_0 = config[config_type].get("output_models")
+save =              my_config.getboolean("save")
 database =          my_config.get("database")
 elements =          my_config.get("elements")
 elements = elements.split(",")
@@ -86,6 +88,9 @@ num_groups =        my_config.getint("projection_rank")
 v =                 my_config.getint("verbosity")
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA PROCESSING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+if v < 3:
+    warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
 # Read in a processed dataset.
 df = pd.read_csv(database,header=[0,1,2])
@@ -816,6 +821,8 @@ class model():
         sub = self.sub_predict(X,data_structured=False,return_std=True,log_y=True)
         f_dir = sub["f1"]["val"].reshape(-1)
         f_dir_std = sub["f1"]["std"].reshape(-1)
+        # This ^ returns a fractional uncertainty.
+        f_dir_std *= np.abs(f_dir)
         # Phase 1 is the gamma' phase, phase 2 is the gamma phase.
         x_1 = x/sub["nom:1"]["val"]
         x_2 = x_1*sub["1:2"]["val"]
@@ -837,11 +844,11 @@ class model():
         # Calculate f to compare to direct value
         f_calc = np.nansum((x_1-x_2)*(x-x_2)/x_2_std**2,axis=1)\
             /(np.nansum((x_1-x_2)**2/x_2_std**2,axis=1)+lambda_)
-        f_calc_std = np.std(np.nansum(((x-2*f_calc[:,np.newaxis]*x_1+(2*f_calc[:,np.newaxis]-1)*x_2)**2*(x_1_std/x_2_std)**2+\
+        f_calc_std = np.sqrt(np.nansum(((x-2*f_calc[:,np.newaxis]*x_1+(2*f_calc[:,np.newaxis]-1)*x_2)**2*(x_1_std/x_2_std)**2+\
                                        ((1-2*f_calc[:,np.newaxis])*x_1+2*(f_calc[:,np.newaxis]-1)*x_1+x)**2)/x_2_std**2,axis=1))\
             /np.abs(np.nansum((x_1-x_2)**2/x_2_std**2,axis=1)+lambda_)
-        f_codes = f_calc_std < f_dir_std
-        f_std = np.fmin(f_calc_std,f_dir_std)
+        f_codes = f_calc_std/np.abs(f_calc) < f_dir_std/np.abs(f_dir)
+        f_std = f_codes*f_calc_std + (~f_codes)*f_dir_std
         f = f_codes*f_calc + (~f_codes)*f_dir
         model_codes = np.array([f_codes,calc_j_1,calc_j_2]).T
         return f,f_std,x_1,x_1_std,x_2,x_2_std,model_codes
@@ -963,6 +970,16 @@ for fold_i in range(n_folds):
     print(120*"-"+"\n")
     # Fit model
     model_k.fit_sub_models(ml_data_dict,verbosity=v)
+    
+    # Pickle model here
+    if save:
+        if n_folds>1:
+            pkl_file = config_type+"_k{:}.pkl".format(fold_i)
+        else:
+            pkl_file = config_type+".pkl"
+        with open(pkl_file,"wb") as pickle_out:
+            pickle.dump(model_k,pickle_out)
+    
     # Make f predicitions for model.
     f_pred,f_pred_std,x_1,x_1_std,x_2,x_2_std,model_codes=model_k.predict(X_ms_t)
     
@@ -1045,7 +1062,7 @@ def plot_f_byModel(f_true,f_pred,f_stds,
     fig,axs=plt.subplots()
     plt.errorbar(f_true,f_pred,yerr=f_stds,fmt=".",ecolor="k",elinewidth=0.5,zorder=0)
     sc = plt.scatter(f_true,f_pred,marker=".",c=model_colours,cmap="brg",zorder=10)
-    if lims==None:
+    if lims is None:
         lims = [min(axs.get_xlim()+axs.get_ylim()),max(axs.get_xlim()+axs.get_ylim())]
     axs.set_xlim(lims)
     axs.set_ylim(lims)
