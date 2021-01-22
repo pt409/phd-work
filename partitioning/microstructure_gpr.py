@@ -19,6 +19,8 @@ from sklearn.gaussian_process.kernels import ConstantKernel
 #from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, cdist, squareform
 
+import matplotlib.pyplot as plt
+
 #from itertools import product
 
 from copy import deepcopy,copy
@@ -620,13 +622,15 @@ class sub_model():
                 y,y_std = self.gpr.predict(X,return_std=return_std)
                 if log_y:
                     y = np.exp(y)
-                    y_std *= y
+                    #y_std *= y # Don't need this, return fractional uncertainty.
+                else:
+                    y_std /= y # Fractional uncertainty.
                 if self.is_element:
                     y = np.where(X[:,self.is_element]==0.0,np.nan,y)
-                    y_std = np.where(X[:,self.is_element]==0.0,np.inf,y_std)
+                    y_std = np.where(X[:,self.is_element]==0.0,np.nan,y_std)
                 return y,y_std
             else:
-                y = gpr.predict(X,return_std=return_std)
+                y = self.gpr.predict(X,return_std=return_std)
                 if log_y:
                     y = np.exp(y)
                 if self.is_element:
@@ -725,40 +729,55 @@ class model():
                     if verbosity >= 2 and self.mixing:
                         print("Pseudo-element representation for model:")
                         model.get_mixing_vals(self.elements)
-                    print(100*"-")
+                    print(120*"-")
     
     def sub_predict(self,X_data,
                     data_structured=True,log_y=True,
                     return_std=True,have_y_data=False):
         # This function makes predicitions for all the sub_models but doesn't do anything with them.
-        predictions = self.matching_data_struct()
+        if data_structured: # dict
+            predictions = self.matching_data_struct()
+        else: # arra
+            to_fill = np.empty((X_data.shape[0],len(self.elements)))
+            predictions = {("nom:{:}".format(phase+1) if phase==0 else "{:}:{:}".format(phase,phase+1)):
+                           {"val":to_fill.copy(),"std":to_fill.copy()} for phase in range(self.phases)}
+            to_fill = np.empty((X_data.shape[0],1))
+            for phase in range(self.phases): predictions["f{:}".format(phase)] = {"val":to_fill.copy(),"std":to_fill.copy()}
         # Assume matching data structure, containing tuples or lists containing X,y, or just X, if data is structured.
-        for ms_ft,sub_fts in self.sub_models.items():
-            for sub_ft,sub_model in sub_fts.items():
-                if have_y_data and data_structured:
-                    predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft][0],
-                                                                   return_std=return_std,log_y=log_y)
-                elif data_structured:
-                    predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft],
-                                                                   return_std=return_std,log_y=log_y)
+        for i,(ms_ft,sub_fts) in enumerate(self.sub_models.items()):
+            for a,(sub_ft,sub_model) in enumerate(sub_fts.items()):
+                if data_structured:
+                    if have_y_data:
+                        predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft][0],
+                                                                       return_std=return_std,log_y=log_y)
+                    else:
+                        predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft],
+                                                                       return_std=return_std,log_y=log_y)
                 else:
-                    predictions[ms_ft][sub_ft] = sub_model.predict(X_data,
-                                                                   return_std=return_std,log_y=log_y)
+                    y,y_std = sub_model.predict(X_data,return_std=return_std,log_y=log_y)
+                    if i<len(self.elements):
+                        predictions[sub_ft]["val"][:,i] = y
+                        predictions[sub_ft]["std"][:,i] = y_std
+                    else:
+                        predictions[sub_ft]["val"][:,0] = y
+                        predictions[sub_ft]["std"][:,0] = y_std
         return predictions
     
     # Currently this only handles two phases alloys.
     def predict(self,X,return_std=True,log_y=True):
         # Here X should be just an array.
         # x is composition part of X
-        x = np.zeros((X.shape[0],len(self.elements)))
+        N = X.shape[0]
+        x = np.zeros((N,len(self.elements)))
         x[:,1:] = X[:,self.comp_range[0]:self.comp_range[1]]
         x[:,0]  = 1.-x.sum(axis=1)
         # Different f models are stored for comparison
-        f_all = np.empty((len(self.sub_models.keys()),X.shape[0]))
+        f_all = np.empty((len(self.sub_models.keys()),N))
         f_std = f_all.copy()
         # Predicitions for each sub-component of the microstrucutre using gpr model.
         sub_predictions = self.sub_predict(X,data_structured=False,return_std=True,log_y=True)
-        f_0,f_std_0 = sub_predictions["f"]["f1"]
+        f_0 = sub_predictions["f1"]["val"]
+        f_std_0 = sub_predictions["f1"]["std"]
         f_all[0,:] = f_0
         f_std[0,:] = f_std_0
         # Calculate microstructural features for each alloy, and associated errors.
@@ -785,6 +804,128 @@ class model():
         f_best = f_all[best_locs]
         f_best_std = f_std[best_locs] # Want absolute errors here
         return f_best,f_best_std,best_models
+    
+    def Predict(self,X,lambda_=0.0):
+        # Here X should be just an array.
+        # x is composition part of X
+        N = X.shape[0]
+        x = np.zeros((N,len(self.elements)))
+        x[:,1:] = X[:,self.comp_range[0]:self.comp_range[1]]
+        x[:,0]  = 1.-x.sum(axis=1)
+        # Predicitions for each sub-component of the microstrucutre using gpr model.
+        sub = self.sub_predict(X,data_structured=False,return_std=True,log_y=True)
+        f_dir = sub["f1"]["val"].reshape(-1)
+        f_dir_std = sub["f1"]["std"].reshape(-1)
+        # Phase 1 is the gamma' phase, phase 2 is the gamma phase.
+        x_1 = x/sub["nom:1"]["val"]
+        x_2 = x_1*sub["1:2"]["val"]
+        # Note these are fractional errors
+        x_1_stdf = sub["nom:1"]["std"]
+        x_2_stdf = np.sqrt(sub["nom:1"]["std"]**2+sub["1:2"]["std"]**2)
+        x_1_std  = x_1_stdf*x_1
+        x_2_std  = x_2_stdf*x_2
+        # Work out where max values occur.
+        calc_j_1 = np.nanargmax(x_1_std,axis=1)
+        calc_j_2 = np.nanargmax(x_2_std,axis=1)
+        for a,(j_1,j_2) in enumerate(zip(calc_j_1,calc_j_2)):
+            # Find new, calculated element.
+            x_1[a,j_1] = 0.0 ; x_1[a,j_1] = 1.-np.nansum(x_1[a])
+            x_2[a,j_2] = 0.0 ; x_2[a,j_2] = 1.-np.nansum(x_2[a])
+            # Find new, calculated uncertainty.
+            x_1_std[a,j_1] = 0.0 ; x_1_std[a,j_1] = np.sqrt(np.nansum(x_1_std[a]**2))
+            x_2_std[a,j_2] = 0.0 ; x_2_std[a,j_2] = np.sqrt(np.nansum(x_2_std[a]**2))
+        # Calculate f to compare to direct value
+        f_calc = np.nansum((x_1-x_2)*(x-x_2)/x_2_std**2,axis=1)\
+            /(np.nansum((x_1-x_2)**2/x_2_std**2,axis=1)+lambda_)
+        f_calc_std = np.std(np.nansum(((x-2*f_calc[:,np.newaxis]*x_1+(2*f_calc[:,np.newaxis]-1)*x_2)**2*(x_1_std/x_2_std)**2+\
+                                       ((1-2*f_calc[:,np.newaxis])*x_1+2*(f_calc[:,np.newaxis]-1)*x_1+x)**2)/x_2_std**2,axis=1))\
+            /np.abs(np.nansum((x_1-x_2)**2/x_2_std**2,axis=1)+lambda_)
+        f_codes = f_calc_std < f_dir_std
+        f_std = np.fmin(f_calc_std,f_dir_std)
+        f = f_codes*f_calc + (~f_codes)*f_dir
+        model_codes = np.array([f_codes,calc_j_1,calc_j_2]).T
+        return f,f_std,x_1,x_1_std,x_2,x_2_std,model_codes
+            
+    def predict_(self,X):
+        # Here X should be just an array.
+        # x is composition part of X
+        N = X.shape[0]
+        x = np.zeros((N,len(self.elements)))
+        x[:,1:] = X[:,self.comp_range[0]:self.comp_range[1]]
+        x[:,0]  = 1.-x.sum(axis=1)
+        # Predicitions for each sub-component of the microstrucutre using gpr model.
+        sub = self.sub_predict(X,data_structured=False,return_std=True,log_y=True)
+        # Certain values that will keep coming up in calc.
+        f_dir = sub["f1"]["val"]
+        f_dir_std = sub["f1"]["std"]
+        # Phase 1 is the gamma' phase, phase 2 is the gamma phase.
+        x_1 = x/sub["nom:1"]["val"]
+        x_2 = x_1*sub["1:2"]["val"]
+        # Note these are fractional errors
+        x_1_stdf = sub["nom:1"]["std"]
+        x_2_stdf = np.sqrt(sub["nom:1"]["std"]**2+sub["1:2"]["std"]**2)
+        x_1_std  = x_1_stdf*x_1
+        x_2_std  = x_2_stdf*x_2
+        # Things to calculate in ugly for-loop below.
+        x_1_sumto1 = np.empty_like(x_1)
+        x_2_sumto1 = np.empty_like(x_2)
+        x_1_sumto1_std = np.empty_like(x_1_std)
+        x_2_sumto1_std = np.empty_like(x_2_std)
+        model_codes = np.empty((N,3),dtype=int)
+        f_opt = f_dir.copy()
+        f_opt_std = f_dir_std.copy()
+        # Yes this SHOULD all be vectorised.
+        for a,(x_a,x_1_a,x_2_a,x_1_std_a,x_2_std_a,x_1_stdf_a,x_2_stdf_a) in enumerate(zip(x,x_1,x_2,x_1_std,x_2_std,x_1_stdf,x_2_stdf)):
+            best_cal_dist_1 = np.inf
+            best_cal_dist_2 = np.inf
+            for j,el in enumerate(self.elements):
+                if x_a[j] > 0.0:
+                    # Calculated elements for each phase
+                    x_1_aj = 1. - np.nansum(x_1_a[:j]) - np.nansum(x_1_a[j+1:])
+                    x_2_aj = 1. - np.nansum(x_2_a[:j]) - np.nansum(x_2_a[j+1:])
+                    if x_1_aj >= 0.0:
+                        # Error in the "calculated" element.
+                        x_1_std_sq_aj = np.nansum(x_1_std_a[:j]**2) + np.nansum(x_1_std_a[j+1:]**2)
+                        # Average error for this model:
+                        #avg_x_1_std_aj = np.nansum(x_1_stdf_a[:j]**2) + np.nansum(x_1_stdf_a[j+1:]**2) \
+                        #    + x_1_std_sq_aj/x_1_aj**2 
+                        cal_dist_1 = (x_1_aj - x_1_a[j])/x_1_std_a[j]
+                        # Keep if best uncertainity.
+                        if cal_dist_1 < best_cal_dist_1:
+                            best_model_1 = j
+                            best_cal_dist_1 = cal_dist_1
+                            best_comp_1 = x_1_a.copy() ; best_comp_1[j] = x_1_aj
+                            best_std_1  = x_1_std_a.copy() ; best_std_1[j] = np.sqrt(x_1_std_sq_aj)
+                    if x_2_aj >= 0.0:
+                        # Error in the "calculated" element.
+                        x_2_std_sq_aj = np.nansum(x_2_std_a[:j]**2) + np.nansum(x_2_std_a[j+1:]**2)
+                        # Average error for this model:
+                        #avg_x_2_std_aj = np.nansum(x_2_stdf_a[:j]**2) + np.nansum(x_2_stdf_a[j+1:]**2) \
+                        #    + x_2_std_sq_aj/x_2_aj**2 
+                        cal_dist_2 = (x_2_aj - x_2_a[j])/x_2_std_a[j]
+                        if cal_dist_2 < best_cal_dist_2:
+                            best_model_2 = j
+                            best_cal_dist_2 = cal_dist_2
+                            best_comp_2 = x_2_a.copy() ; best_comp_2[j] = x_2_aj
+                            best_std_2  = x_2_std_a.copy() ; best_std_2[j] = np.sqrt(x_2_std_sq_aj)
+            # Store optimal models found, calculate f
+            f_cal = np.nansum((x_a-best_comp_2)*(best_comp_1-best_comp_2))/np.nansum((best_comp_1-best_comp_2)**2)
+            f_cal_std = np.sqrt(np.nansum(((2.*f_cal-1.)*best_comp_1+2.*(1.-f_cal)*best_comp_2-x_a)**2*best_std_2**2 +\
+                                      (x_a+(2.*f_cal-1.)*best_comp_2-2.*f_cal*best_comp_1)**2*best_std_1**2)) \
+                /np.abs(np.nansum((x_a-best_comp_2)*(best_comp_1-best_comp_2))) # fractional error
+            if f_cal_std < f_dir_std[a,0]:
+                f_opt[a,0] = f_cal
+                f_opt_std[a,0] = f_cal_std
+                model_codes[a] = np.array([1,best_model_1,best_model_2])
+            else:
+                model_codes[a] = np.array([0,best_model_1,best_model_2])
+            x_1_sumto1[a] = best_comp_1 ; x_1_sumto1_std[a] = best_std_1
+            x_2_sumto1[a] = best_comp_2 ; x_2_sumto1_std[a] = best_std_2
+        # Return fractional errors in composition to be consistent
+        x_1_sumto1_std /= x_1_sumto1
+        x_2_sumto1_std /= x_2_sumto1_std
+        return x_1_sumto1,x_1_sumto1_std,x_2_sumto1,x_2_sumto1_std,f_opt,f_opt_std,model_codes
+            
                     
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% KERNEL SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
@@ -856,9 +997,6 @@ for fold_i in range(n_folds):
         N_train = N - N_test
         train_df = pd.concat([ms_df.iloc[(fold_i+1)*N_test:,:],ms_df.iloc[:fold_i*N_test,:]])
         test_df  = ms_df.iloc[fold_i*N_test:(fold_i+1)*N_test,:]
-        print("\n"+100*"-")
-        print(29*"-"+"BEGINNING FIT TO TRAINING DATA SELECTION {:}".format(fold_i)+29*"-")
-        print(100*"-"+"\n")
     else:
         N_train = int(np.rint(N*(1.-test_frac)))
         train_df = ms_df.iloc[:N_train,:]
@@ -877,13 +1015,12 @@ for fold_i in range(n_folds):
         part_coeff_header = [("γ/γ’ partitioning ratio","at. %",el),("Composition","at. %",el),("γ’ composition","at. %",el)]
         # Get training data:
         x,y = get_Xy(train_df,part_coeff_header,min_max=[0.0,None],ht=incl_ht)
-        ml_data_dict[el]["nom:1"] = (x,np.log(y[:,0]))
-        ml_data_dict[el]["1:2"] = (x,np.log(y[:,1]/y[:,2]))
+        ml_data_dict[el]["nom:1"] = (x,np.log(y[:,1]/y[:,2]))
+        ml_data_dict[el]["1:2"] = (x,np.log(y[:,0]))
         # Get test data
         x,y = get_Xy(test_df,part_coeff_header,min_max=[0.0,None],ht=incl_ht)
-        ml_data_dict_t[el]["nom:1"] = (x,y[:,0])
-        ml_data_dict_t[el]["1:2"] = (x,y[:,1]/y[:,2])
-        x_prc_target = 0.01*(test_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
+        ml_data_dict_t[el]["nom:1"] = (x,y[:,1]/y[:,2])
+        ml_data_dict_t[el]["1:2"] = (x,y[:,0])
     # Get training data for f
     x,y = get_Xy(train_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
     ml_data_dict["f"]["f1"] = (x,np.log(0.01*y))
@@ -893,7 +1030,11 @@ for fold_i in range(n_folds):
     # Test data used to make predictions on/against:
     X_ms_t = x.copy()
     x_prc_target_t = 0.01*(test_df.loc[:,("γ’ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
+    x_mtx_target_t = 0.01*(test_df.loc[:,("γ composition","at. %")]).drop(["Hf","Nb"],axis=1).astype(np.float64).values
     
+    print("\n"+120*"-")
+    print(40*"-"+"BEGINNING FIT TO TRAINING DATA FOLD k={:}".format(fold_i)+40*"-")
+    print(120*"-"+"\n")
     # Fit model
     model_k.fit_sub_models(ml_data_dict,verbosity=v)
     # Make f predicitions for model.
@@ -910,7 +1051,7 @@ for fold_i in range(n_folds):
     f_stds_kfolds = np.append(f_stds_kfolds,f_std_t)
     
 # Some final output
-print("\n\n---------------------------------------------------")
+print("\n"+120*"=")
 f_comm_true_kfolds = f_true_kfolds[(f_true_kfolds>=0.55) & (f_true_kfolds<=0.85)]
 f_comm_pred_kfolds = f_pred_kfolds[(f_true_kfolds>=0.55) & (f_true_kfolds<=0.85)]
 print("\nOverall R^2 score on {:}-folds = {:5f}".format(n_folds,r2_score(f_true_kfolds,f_pred_kfolds)))
