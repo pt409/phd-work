@@ -26,6 +26,8 @@ import matplotlib.pyplot as plt
 
 from copy import deepcopy,copy
 
+from pprint import pprint
+
 import configparser
 import sys
 
@@ -50,7 +52,7 @@ def parse_listlike(list_string):
 # Uses a configparser file (.ini structure).
 config_default = "test"
 config = configparser.ConfigParser()
-config.read("microstructure_gpr.input")
+config.read(["ms_gpr.params","microstructure_gpr.input"])
 if len(sys.argv) > 1:
     if sys.argv[1] in config.sections():
         config_type = sys.argv[1]
@@ -86,6 +88,10 @@ groups = parse_listlike(groups)
 num_groups =        my_config.getint("projection_rank")
 # Verbosity of output
 v =                 my_config.getint("verbosity")
+if v > 1:
+    print("Configuration for fitting:")
+    print("Configuration section: "+config_type)
+    pprint(dict(my_config))
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA PROCESSING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -859,32 +865,48 @@ class model():
 def setup_kernel(kernel_type,feature_range):
     kernel_settings = kernel_type.lower().split("_")
     mixing = False
-    if kernel_settings[-1] == "comp":
-        comp_style = True
-    else:
-        comp_style = False
+    comp_style = True if "comp" in kernel_settings else False
+    ard = True if "ard" in kernel_settings else False
+    n_feats = feature_range[1]-feature_range[0]
     if kernel_settings[0] == "l1rbf":
-        kernel = L1RBF(1.0,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
+        if ard and comp_style:
+            l = np.ones(n_feats+1)
+        elif ard:
+            l = np.ones(n_feats)
+        else:
+            l = 1.0
+        kernel = L1RBF(l,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
     elif kernel_settings[0] == "l2rbf":
-        kernel = L2RBF(1.0,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
+        if ard and comp_style:
+            l = np.ones(n_feats+1)
+        elif ard:
+            l = np.ones(n_feats)
+        else:
+            l = 1.0
+        kernel = L2RBF(l,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
     elif kernel_settings[0] == "physrbf":
-        kernel = physRBF(1.e4,(1.e-1,1.e8),dims=n,dim_range=feature_range)
+        l = 1.e4*np.ones(n_feats//2) if ard else 1.e4
+        kernel = physRBF(l,(1.e-1,1.e8),dims=n,dim_range=feature_range)
     elif kernel_settings[0] == "l1rbfpr":
-        kernel = subspace_L1RBF(1.0,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
+        l = np.ones(num_groups) if ard else 1.0
+        kernel = subspace_L1RBF(l,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
                                 dim_range=feature_range,comp=comp_style)
     elif kernel_settings[0] == "l2rbfpr":
-        kernel = subspace_L2RBF(1.0,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
+        l = np.ones(num_groups) if ard else 1.0
+        kernel = subspace_L2RBF(l,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
                                 dim_range=feature_range,comp=comp_style)
     elif kernel_settings[0] == "l1rbfmixpr":
+        l = np.ones(num_groups) if ard else 1.0
         init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
-        kernel = subspace_mixing_L1RBF(1.0,(1.e-5,1.e5),
+        kernel = subspace_mixing_L1RBF(l,(1.e-5,1.e5),
                                        mix_vals=init_mix_vals,
                                        groups=groups,num_groups=num_groups,
                                        dim_range=feature_range,comp=comp_style)
         mixing = True
     elif kernel_settings[0] == "l2rbfmixpr":
+        l = np.ones(num_groups) if ard else 1.0
         init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
-        kernel = subspace_mixing_L2RBF(1.0,(1.e-5,1.e5),
+        kernel = subspace_mixing_L2RBF(l,(1.e-5,1.e5),
                                        mix_vals=init_mix_vals,
                                        groups=groups,num_groups=num_groups,
                                        dim_range=feature_range,comp=comp_style)
