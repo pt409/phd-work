@@ -27,6 +27,10 @@ ht_kernel_1 = None
 # Grouping (i.e. rank of projection matrix, and position of 1s in matrix).
 projection_rank = 3
 projection_groups = 0,0,0,1,1,2,2,1,2,1
+# Use a special superalloy model for mean function of certain elements
+mean_fn_els = Al,Ta,Ti
+# Which elements to use the model for. None means the model isn't used
+mean_fn_use = Al,Ti
 # Options for the predictive model
 # Sub-models 
 # Output details, verbosity in ascending order, 0,1, or 2.

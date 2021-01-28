@@ -86,6 +86,9 @@ alpha_noise =       my_config.getfloat("kernel_noise")
 groups =            my_config.get("projection_groups")
 groups = parse_listlike(groups)
 num_groups =        my_config.getint("projection_rank")
+mean_fn_els =       my_config.get("mean_fn_els").split(",")
+mean_fn_use =       my_config.get("mean_fn_use").split(",")
+superalloy_model = False if len(mean_fn_use)==1 and mean_fn_use[0].lower()=="none" else True
 # Verbosity of output
 v =                 my_config.getint("verbosity")
 if v > 1:
@@ -606,18 +609,35 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL CLASS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # These 2 classes do all the heavy lifting of fitting models and making predictions
 class sub_model():
-    def __init__(self,gpr_model,scaler,is_element=False):
+    def __init__(self,gpr_model,scaler,is_element=False,log_y=True,
+                 use_superalloy_model=False,
+                 superalloy_model=None):
         self.gpr = deepcopy(gpr_model)
         if scaler:
             self.scaler = deepcopy(scaler)
         else: self.scaler = None
         # If the sub_model represents a certain element then we want to exclude it from predictions.
         self.is_element = is_element
+        self.log_y = log_y
+        self.use_superalloy_model = use_superalloy_model
+        # This should be a lambda function
+        self.superalloy_model = superalloy_model
+        # Some flags
         self.fitted_flag = False
         self.train_X = None
         self.train_y = None
         
     def fit(self,X,y):
+        # Case of prediciting log value for y
+        if self.log_y:
+            y = np.log(y)
+            # Case of also having a model of the y mean.
+            if self.use_superalloy_model:
+                y -= np.log(self.superalloy_model(X))
+        # Case not using log(y) but have a model for y mean.
+        elif self.use_superalloy_model:
+            y -= self.superalloy_model(X)
+        # Case of standardising X data first.
         if self.scaler:
             X = self.scaler.fit_transform(X)
         self.gpr.fit(X,y)
@@ -625,27 +645,34 @@ class sub_model():
         self.train_X = X
         self.train_y = y
     
-    def predict(self,X,return_std=True,log_y=True):
+    def predict(self,X,return_std=True):
         if self.fitted_flag:
+            if self.use_superalloy_model:
+                y_mean = self.superalloy_model(X)
+            elif self.log_y:
+                y_mean = 1.
+            else:
+                y_mean = 0.
+            # Case in which X data is scaled.
             if self.scaler:
                 X = self.scaler.transform(X)
+            y,y_std = self.gpr.predict(X,return_std=True)
+            # Case of predicting a log value for y.
+            if self.log_y:
+                y = np.exp(y)*y_mean
+                y_std /= y_mean # Return fractional uncertainty.
+            # Case of predicting a direct value for y.
+            else:
+                y += y_mean
+                y_std /= y # Fractional uncertainty.
+            # If the model represents an element, we want to return nan where there is ...
+            # ... no corresponding element in the nominal composition X.
+            if self.is_element:
+                y = np.where(X[:,self.is_element]==0.0,np.nan,y)
+                y_std = np.where(X[:,self.is_element]==0.0,np.nan,y_std)
             if return_std:
-                y,y_std = self.gpr.predict(X,return_std=return_std)
-                if log_y:
-                    y = np.exp(y)
-                    #y_std *= y # Don't need this, return fractional uncertainty.
-                else:
-                    y_std /= y # Fractional uncertainty.
-                if self.is_element:
-                    y = np.where(X[:,self.is_element]==0.0,np.nan,y)
-                    y_std = np.where(X[:,self.is_element]==0.0,np.nan,y_std)
                 return y,y_std
             else:
-                y = self.gpr.predict(X,return_std=return_std)
-                if log_y:
-                    y = np.exp(y)
-                if self.is_element:
-                    y = np.where(X[:,self.is_element]==0.0,np.nan,y)
                 return y
         else: raise ValueError(
             "Model has not yet been fitted.")
@@ -671,7 +698,9 @@ class model():
                  standardise_comp,standardise_ht,
                  comp_range,ht_range,
                  n_restarts_optimizer=2,
-                 phases=2,kernel_pr_mixing=False):
+                 phases=2,kernel_pr_mixing=False,
+                 use_superalloy_model=True,
+                 mean_fn_els=["Al","Ta","Ti"],mean_fn_use=["Al","Ta","Ti"],x_former=.2):
         self.proto_kernel = kernel
         self.elements = elements
         self.alpha = alpha
@@ -680,6 +709,16 @@ class model():
         self.n_restarts_optimizer = n_restarts_optimizer
         self.phases = phases
         self.mixing = kernel_pr_mixing
+        self.use_superalloy_model = use_superalloy_model
+        # Setup mean function model
+        mean_fn_els = [comp_range[0]+i-1 for i,el in enumerate(elements) if el in mean_fn_els]
+        if use_superalloy_model:
+            self.mean_fn = lambda X: x_former*np.nansum(X[:,mean_fn_els],axis=1)**-1
+        else:
+            self.mean_fn = lambda X: X
+        self.mean_fn_use = mean_fn_use
+        # Currently fixed .... not sure why
+        self.log_y = True
         # Run setup of various sub_models
         self.__setup_sub_models()
         
@@ -704,17 +743,20 @@ class model():
         self.sub_models = {}
         for ind,el in enumerate(self.elements):
             self.sub_models[el] = {}
-            # Pass this value to sub_model to work out which elements to exclude in prediction.
-            if ind>0: # Assume base element is always included.
-                element_ind = ind - len(self.elements)
-            else:
-                element_ind = False
+            # Pass this value to sub_model to work out which results to exclude in prediction.
+            # Assume base element is always included.
+            element_ind = ind - len(self.elements) if ind>0 else False
+            # Work out whether this model will use an explicit model of the mean value or not.
+            has_mean_model = True if (el in self.mean_fn_use and self.use_superalloy_model) else False
             for phase in range(self.phases):
                 part_coeff_name = "nom:{:}".format(phase+1) if phase==0 else "{:}:{:}".format(phase,phase+1)
-                self.sub_models[el][part_coeff_name] = sub_model(gpr,scaler,element_ind)
+                self.sub_models[el][part_coeff_name] = sub_model(gpr,scaler,is_element=element_ind,log_y=self.log_y,
+                                                                 use_superalloy_model=has_mean_model,
+                                                                 superalloy_model=self.mean_fn)
         self.sub_models["f"] = {}
         for phase in range(1,self.phases):
-            self.sub_models["f"]["f{:}".format(phase)] = sub_model(gpr,scaler)
+            self.sub_models["f"]["f{:}".format(phase)] = sub_model(gpr,scaler,log_y=self.log_y,
+                                                                   use_superalloy_model=False)
                 
     def matching_data_struct(self):
         # Return a data structure matching that of the model
@@ -732,14 +774,14 @@ class model():
     def fit_sub_models(self,Xy_data,verbosity=1):
         # Assume matching data structure, containing tuples or lists containing X,y.
         for ms_ft,sub_fts in self.sub_models.items():
-            for sub_ft,model in sub_fts.items():
-                model.fit(*Xy_data[ms_ft][sub_ft])
+            for sub_ft,sub_model in sub_fts.items():
+                sub_model.fit(*Xy_data[ms_ft][sub_ft])
                 # Print some output from the model.
                 if verbosity >= 1:
                     print("Fitting model for "+ms_ft+" phase "+sub_ft+" feature...")
                     if verbosity >= 2 and self.mixing:
                         print("Pseudo-element representation for model:")
-                        model.get_mixing_vals(self.elements)
+                        sub_model.get_mixing_vals(self.elements)
                     print(120*"-")
     
     def sub_predict(self,X_data,
@@ -760,12 +802,12 @@ class model():
                 if data_structured:
                     if have_y_data:
                         predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft][0],
-                                                                       return_std=return_std,log_y=log_y)
+                                                                       return_std=return_std)
                     else:
                         predictions[ms_ft][sub_ft] = sub_model.predict(X_data[ms_ft][sub_ft],
-                                                                       return_std=return_std,log_y=log_y)
+                                                                       return_std=return_std)
                 else:
-                    y,y_std = sub_model.predict(X_data,return_std=return_std,log_y=log_y)
+                    y,y_std = sub_model.predict(X_data,return_std=return_std)
                     if i<len(self.elements):
                         predictions[sub_ft]["val"][:,i] = y
                         predictions[sub_ft]["std"][:,i] = y_std
@@ -958,7 +1000,8 @@ for fold_i in range(n_folds):
     # Setup model 
     model_k = model(elements,kernel,alpha_noise,seed,
                     standardise_comp,standardise_ht,comp_range,ht_range,
-                    kernel_pr_mixing=use_mixing)
+                    kernel_pr_mixing=use_mixing,use_superalloy_model=superalloy_model,
+                    mean_fn_els=mean_fn_els,mean_fn_use=mean_fn_use)
     # Get the test/training data
     ml_data_dict = model_k.matching_data_struct()
     ml_data_dict_t = deepcopy(ml_data_dict) # To store the test data.
@@ -966,15 +1009,15 @@ for fold_i in range(n_folds):
         part_coeff_header = [("γ/γ’ partitioning ratio","at. %",el),("Composition","at. %",el),("γ’ composition","at. %",el)]
         # Get training data:
         x,y = get_Xy(train_df,part_coeff_header,min_max=[0.0,None],ht=incl_ht)
-        ml_data_dict[el]["nom:1"] = (x,np.log(y[:,1]/y[:,2]))
-        ml_data_dict[el]["1:2"] = (x,np.log(y[:,0]))
+        ml_data_dict[el]["nom:1"] = (x,y[:,1]/y[:,2])
+        ml_data_dict[el]["1:2"] = (x,y[:,0])
         # Get test data
         x,y = get_Xy(test_df,part_coeff_header,min_max=[0.0,None],ht=incl_ht)
         ml_data_dict_t[el]["nom:1"] = (x,y[:,1]/y[:,2])
         ml_data_dict_t[el]["1:2"] = (x,y[:,0])
     # Get training data for f
     x,y = get_Xy(train_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
-    ml_data_dict["f"]["f1"] = (x,np.log(0.01*y))
+    ml_data_dict["f"]["f1"] = (x,0.01*y)
     # Get test data for f
     x,y = get_Xy(test_df,("γ’ fraction","at. %"),drop_na=False,flatten=True,ht=incl_ht)
     ml_data_dict_t["f"]["f1"] = (x,0.01*y)
@@ -1010,10 +1053,20 @@ for fold_i in range(n_folds):
     if v<1:
         print("\nPhase fraction R^2 score for fold {:} = {:5f}".format(fold_i,r2_score(f_true,f_pred)))
     else:
-        r2_prc = 1.-np.nansum((x_1-x_prc_target_t)**2,axis=0)\
-            /np.nansum((np.nanmean(np.isnan(x_1)*x_1+x_prc_target_t,axis=0)-x_prc_target_t)**2,axis=0)
-        r2_mtx = 1.-np.nansum((x_2-x_mtx_target_t)**2,axis=0)\
-            /np.nansum((np.nanmean(np.isnan(x_2)*x_2+x_mtx_target_t,axis=0)-x_mtx_target_t)**2,axis=0)
+        if v > 2:
+            r2_prc = 1.-np.nansum((x_1-x_prc_target_t)**2,axis=0)\
+                /np.nansum((np.nanmean(np.isnan(x_1)*x_1+x_prc_target_t,axis=0)-x_prc_target_t)**2,axis=0)
+            r2_mtx = 1.-np.nansum((x_2-x_mtx_target_t)**2,axis=0)\
+                /np.nansum((np.nanmean(np.isnan(x_2)*x_2+x_mtx_target_t,axis=0)-x_mtx_target_t)**2,axis=0)
+        else:
+            with warnings.catch_warnings():
+                # Could have a mean of empty slice / divide by zero error here if test data doesn't include any data for a certain element.
+                # But it still produces the right output in this case so it is safe to ignore. 
+                warnings.simplefilter("ignore",category=RuntimeWarning)
+                r2_prc = 1.-np.nansum((x_1-x_prc_target_t)**2,axis=0)\
+                    /np.nansum((np.nanmean(np.isnan(x_1)*x_1+x_prc_target_t,axis=0)-x_prc_target_t)**2,axis=0)
+                r2_mtx = 1.-np.nansum((x_2-x_mtx_target_t)**2,axis=0)\
+                    /np.nansum((np.nanmean(np.isnan(x_2)*x_2+x_mtx_target_t,axis=0)-x_mtx_target_t)**2,axis=0)
         print("\nR^2 for microstructural features:\n"+(n_els+2)*8*"-")
         print("    \t"+"    \t".join(elements)+"    \tf\n"+(n_els+2)*8*"-")
         print("γ’ |\t"+"\t".join(map("{:.4f}".format,r2_prc))+"\t{:.4f}".format(r2_score(f_true,f_pred)))

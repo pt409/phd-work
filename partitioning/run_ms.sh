@@ -6,7 +6,7 @@ seed=1934
 oldconfig=$config0
 while [[ $(perl -e "print $noiseExp < -1") == "1" ]]
 do
-	noise=$(perl -e 'print 10**$noiseExp')
+	noise=$(perl -e "print 10**$noiseExp")
 	newconfig=$config0'_1e'$noiseExp
 	sed -i "s/\[$oldconfig\]/\[$newconfig\]/g" microstructure_gpr.input
 	sed -i "s/kernel_noise = .*/kernel_noise = $noise/g" microstructure_gpr.input
