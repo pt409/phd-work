@@ -17,6 +17,7 @@ from scipy.stats import pearsonr
 import sklearn.gaussian_process as gp
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel
+from sklearn.decomposition import PCA
 #from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, cdist, squareform
 
@@ -85,7 +86,8 @@ ht_kernel_1 =       my_config.get("ht_kernel_1")
 alpha_noise =       my_config.getfloat("kernel_noise")
 groups =            my_config.get("projection_groups")
 groups = parse_listlike(groups)
-num_groups =        my_config.getint("projection_rank")
+num_groups =        my_config.getfloat("projection_rank")
+num_groups = int(num_groups) if num_groups%1 != num_groups else num_groups
 mean_fn_els =       my_config.get("mean_fn_els").split(",")
 mean_fn_use =       my_config.get("mean_fn_use").split(",")
 superalloy_model = False if len(mean_fn_use)==1 and mean_fn_use[0].lower()=="none" else True
@@ -144,30 +146,33 @@ def get_microstructure_data(df,drop_duplicate_comps=False,shuffle_seed=None):
 def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
            min_max=None,drop_na=True,flatten=False,ht=False,log_y=False):
     # Enter header as tuple in case of multiindex
-    # drop rows less/greater than certain min/max values
-    if drop_na:
-        sub_df = df.dropna(subset=y_header)
+    if y_header:
+        # drop rows less/greater than certain min/max values
+        if drop_na:
+            sub_df = df.dropna(subset=y_header)
+        else:
+            sub_df = df.copy()
+        if min_max:
+            min_, max_ = tuple(min_max)
+            if isinstance(min_,float): 
+                condition_0 = (sub_df != False)
+                condition = sub_df[y_header].astype("float64") > min_ # Min
+                condition_0.update(condition)
+                sub_df = sub_df[condition_0].dropna(subset=y_header)
+            if isinstance(max_,float): 
+                condition_0 = (sub_df != False)
+                condition = sub_df[y_header].astype("float64") < max_ # Max
+                condition_0.update(condition)
+                sub_df = sub_df[condition_0].dropna(subset=y_header)
+        # Now drop empty rows
+        # Start getting data here:
+        y = sub_df.loc[:,y_header].astype("float64").values
+        if flatten and len(y.shape) > 1 and y.shape[-1] == 1:
+            y = y.flatten()
+        if log_y:
+            y = np.log(y)
     else:
         sub_df = df.copy()
-    if min_max:
-        min_, max_ = tuple(min_max)
-        if isinstance(min_,float): 
-            condition_0 = (sub_df != False)
-            condition = sub_df[y_header].astype("float64") > min_ # Min
-            condition_0.update(condition)
-            sub_df = sub_df[condition_0].dropna(subset=y_header)
-        if isinstance(max_,float): 
-            condition_0 = (sub_df != False)
-            condition = sub_df[y_header].astype("float64") < max_ # Max
-            condition_0.update(condition)
-            sub_df = sub_df[condition_0].dropna(subset=y_header)
-    # Now drop empty rows
-    # Start getting data here:
-    y = sub_df.loc[:,y_header].astype("float64").values
-    if flatten and len(y.shape) > 1 and y.shape[-1] == 1:
-        y = y.flatten()
-    if log_y:
-        y = np.log(y)
     X1 = 0.01*(sub_df.loc[:,("Composition","at. %")].drop(drop_els,axis=1).astype("float64").values)
     if ht:
         X0 = sub_df.loc[:,("Precipitation heat treatment")]
@@ -177,7 +182,10 @@ def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
         X = np.append(X0,X1,axis=1)
     else:
         X = X1
-    return X,y
+    if y_header:
+        return X,y
+    else:
+        return X
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SCALER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Based on sklearn.preprocessing.StandardScaler
@@ -256,11 +264,15 @@ class L2RBF(gp.kernels.RBF):
         A = A.T # Use transpose since vectors are represented by rows not columns.
         self.A = A
         
+    def trans(self,X):
+        return X@self.A
+        
     def __call__(self, X, Y=None, eval_gradient=False):
         X = np.atleast_2d(X)
-        length_scale = gp.kernels._check_length_scale(X@self.A, self.length_scale)
+        X = self.trans(X)
+        length_scale = gp.kernels._check_length_scale(X, self.length_scale)
         if Y is None:
-            dists = pdist(X@self.A / length_scale, metric='sqeuclidean')
+            dists = pdist(X / length_scale, metric='sqeuclidean')
             K = np.exp(-.5 * dists)
             # convert from upper-triangular matrix to square matrix
             K = squareform(K)
@@ -269,21 +281,22 @@ class L2RBF(gp.kernels.RBF):
             if eval_gradient:
                 raise ValueError(
                     "Gradient can only be evaluated when Y is None.")
-            dists = cdist(X@self.A / length_scale, Y@self.A / length_scale,
+            Y = self.trans(Y)
+            dists = cdist(X / length_scale, Y / length_scale,
                           metric='sqeuclidean')
             K = np.exp(-.5 * dists)
 
         if eval_gradient:
             if self.hyperparameter_length_scale.fixed:
                 # Hyperparameter l kept fixed
-                return K, np.empty(((X@self.A).shape[0], (X@self.A).shape[0], 0))
+                return K, np.empty((X.shape[0], X.shape[0], 0))
             elif not self.anisotropic or length_scale.shape[0] == 1:
                 K_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
-                K_gradient = ((X@self.A)[:, np.newaxis, :] - (X@self.A)[np.newaxis, :, :])**2 \
+                K_gradient = (X[:, np.newaxis, :] - X[np.newaxis, :, :])**2 \
                     / length_scale
                 K_gradient *= K[..., np.newaxis]
                 return K, K_gradient
@@ -299,9 +312,10 @@ class L1RBF(L2RBF):
                 
     def __call__(self, X, Y=None, eval_gradient=False):
         X = np.atleast_2d(X)
-        length_scale = gp.kernels._check_length_scale(X@self.A, self.length_scale)
+        X = self.trans(X)
+        length_scale = gp.kernels._check_length_scale(X, self.length_scale)
         if Y is None:
-            dists = pdist(X@self.A / length_scale, metric='cityblock')
+            dists = pdist(X / length_scale, metric='cityblock')
             K = np.exp(-1. * dists)
             # convert from upper-triangular matrix to square matrix
             K = squareform(K)
@@ -310,21 +324,22 @@ class L1RBF(L2RBF):
             if eval_gradient:
                 raise ValueError(
                     "Gradient can only be evaluated when Y is None.")
-            dists = cdist(X@self.A / length_scale, Y@self.A / length_scale,
+            Y = self.trans(Y)
+            dists = cdist(X / length_scale, Y / length_scale,
                           metric='cityblock')
             K = np.exp(-1. * dists)
 
         if eval_gradient:
             if self.hyperparameter_length_scale.fixed:
                 # Hyperparameter l kept fixed
-                return K, np.empty(((X@self.A).shape[0], (X@self.A).shape[0], 0))
+                return K, np.empty((X.shape[0], X.shape[0], 0))
             elif not self.anisotropic or length_scale.shape[0] == 1:
                 K_gradient = \
                     (K * squareform(dists))[:, :, np.newaxis]
                 return K, K_gradient
             elif self.anisotropic:
                 # We need to recompute the pairwise dimension-wise distances
-                K_gradient = np.abs((X@self.A)[:, np.newaxis, :] - (X@self.A)[np.newaxis, :, :]) \
+                K_gradient = np.abs(X[:, np.newaxis, :] - X[np.newaxis, :, :]) \
                     / length_scale
                 K_gradient *= K[..., np.newaxis]
                 return K, K_gradient
@@ -431,6 +446,39 @@ class subspace_L1RBF(L1RBF):
         for col,group in enumerate(self.groups):
             A[group][col]=1.
         self.A = (A @ Ilike).T # Use transpose since vectors are represented by rows not columns.
+
+# Use a (supplied) PCA to project X onto a subspace.
+class subspace_PCA_L2RBF(L2RBF):
+    def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
+                 pca_components=None,
+                 dims=15,dim_range=None,comp=True):
+        self.pca_components = pca_components
+        super(subspace_PCA_L2RBF,self).__init__(length_scale,length_scale_bounds,
+                 dims,dim_range,comp)
+        
+    def constr_trans(self):
+        Ilike = np.eye(self.dims)
+        if self.dim_range: 
+            Ilike = Ilike[self.dim_range[0]:self.dim_range[1],:]
+        if self.comp: 
+            Ilike = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],Ilike]        # Subspace projection part of matrix
+        self.A = (self.pca_components @ Ilike).T
+    
+class subspace_PCA_L1RBF(L2RBF):
+    def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
+                 pca_components=None,
+                 dims=15,dim_range=None,comp=True):
+        self.pca_components = pca_components
+        super(subspace_PCA_L1RBF,self).__init__(length_scale,length_scale_bounds,
+                 dims,dim_range,comp)
+        
+    def constr_trans(self):
+        Ilike = np.eye(self.dims)
+        if self.dim_range: 
+            Ilike = Ilike[self.dim_range[0]:self.dim_range[1],:]
+        if self.comp: 
+            Ilike = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],Ilike]        # Subspace projection part of matrix
+        self.A = (self.pca_components @ Ilike).T
         
 # Allow projections but also allow mixing of groups.
 class subspace_mixing_L2RBF(subspace_L2RBF):
@@ -494,12 +542,23 @@ class subspace_mixing_L2RBF(subspace_L2RBF):
         self.A[self.mixed_el_pos,self.mixed_groups[:,1]] = self.mix_vals
         
     def compute_gradient(self,X,X_pr,K,gradient):
-        for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
-            a,b = ab
-            grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))
-            grad_i *= -mix_val*K/(self.length_scale**2)
-            grad_i = grad_i[:,:,np.newaxis]
-            gradient = np.dstack((gradient,grad_i))
+        if not self.anisotropic:
+            for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
+                a,b = ab
+                grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i])*pdist(X_pr,lambda x,y: x[b]-x[a]-y[b]+y[a]))
+                grad_i *= -mix_val*K/(self.length_scale**2)
+                grad_i = grad_i[:,:,np.newaxis]
+                gradient = np.dstack((gradient,grad_i))
+        elif self.anisotropic:
+            for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
+                a,b = ab
+                grad_i = squareform(pdist(X,
+                                          lambda x,y: x[i]-y[i])*pdist(X_pr,
+                                          lambda x,y: (x[b]-y[b])/self.length_scale[b]**2\
+                                              -(x[a]-y[a])/self.length_scale[a]**2))
+                grad_i *= -mix_val*K
+                grad_i = grad_i[:,:,np.newaxis]
+                gradient = np.dstack((gradient,grad_i))
         return gradient
     
     def __call__(self, X, Y=None, eval_gradient=False):
@@ -555,13 +614,23 @@ class subspace_mixing_L1RBF(subspace_mixing_L2RBF):
                                                    groups,num_groups,dims,dim_range,comp)
     
     def compute_gradient(self,X,X_pr,K,gradient):
-        for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
-            a,b = ab
-            grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i]) \
-                                *pdist(X_pr,lambda x,y: np.sign(x[b]-y[b]) - np.sign(x[a]-y[a])))
-            grad_i *= -mix_val*K/self.length_scale
-            grad_i = grad_i[:,:,np.newaxis]
-            gradient = np.dstack((gradient,grad_i))
+        if not self.anisotropic:
+            for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
+                a,b = ab
+                grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i]) \
+                                    *pdist(X_pr,lambda x,y: np.sign(x[b]-y[b]) - np.sign(x[a]-y[a])))
+                grad_i *= -mix_val*K/self.length_scale
+                grad_i = grad_i[:,:,np.newaxis]
+                gradient = np.dstack((gradient,grad_i))
+        elif self.anisotropic:
+            for ab,i,mix_val in zip(self.mixed_groups,self.mixed_el_pos,self.mix_vals):
+                a,b = ab
+                grad_i = squareform(pdist(X,lambda x,y: x[i]-y[i]) \
+                                    *pdist(X_pr,lambda x,y: np.sign(x[b]-y[b])/self.length_scale[b] \
+                                           - np.sign(x[a]-y[a])/self.length_scale[a]))
+                grad_i *= -mix_val*K
+                grad_i = grad_i[:,:,np.newaxis]
+                gradient = np.dstack((gradient,grad_i))
         return gradient
     
     def __call__(self, X, Y=None, eval_gradient=False):
@@ -904,68 +973,86 @@ class model():
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% KERNEL SETUP %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
 # Sets up kernel using settings in config file
-def setup_kernel(kernel_type,feature_range):
-    kernel_settings = kernel_type.lower().split("_")
-    mixing = False
-    comp_style = True if "comp" in kernel_settings else False
-    ard = True if "ard" in kernel_settings else False
-    n_feats = feature_range[1]-feature_range[0]
-    if kernel_settings[0] == "l1rbf":
-        if ard and comp_style:
-            l = np.ones(n_feats+1)
-        elif ard:
-            l = np.ones(n_feats)
+def setup_kernel(X=None):
+    def setup_sub_kernel(kernel_type,feature_range):
+        kernel_settings = kernel_type.lower().split("_")
+        mixing = False
+        comp_style = True if "comp" in kernel_settings else False
+        ard = True if "ard" in kernel_settings else False
+        n_feats = feature_range[1]-feature_range[0]
+        if kernel_settings[0] == "l1rbf":
+            if ard and comp_style:
+                l = np.ones(n_feats+1)
+            elif ard:
+                l = np.ones(n_feats)
+            else:
+                l = 1.0
+            kernel = L1RBF(l,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
+        elif kernel_settings[0] == "l2rbf":
+            if ard and comp_style:
+                l = np.ones(n_feats+1)
+            elif ard:
+                l = np.ones(n_feats)
+            else:
+                l = 1.0
+            kernel = L2RBF(l,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
+        elif kernel_settings[0] == "physrbf":
+            l = 1.e4*np.ones(n_feats//2) if ard else 1.e4
+            kernel = physRBF(l,(1.e-1,1.e8),dims=n,dim_range=feature_range)
+        elif kernel_settings[0] == "l1rbfpr":
+            l = np.ones(num_groups) if ard else 1.0
+            kernel = subspace_L1RBF(l,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
+                                    dim_range=feature_range,comp=comp_style)
+        elif kernel_settings[0] == "l2rbfpr":
+            l = np.ones(num_groups) if ard else 1.0
+            kernel = subspace_L2RBF(l,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
+                                    dim_range=feature_range,comp=comp_style)
+        elif kernel_settings[0] == "l1rbfmixpr":
+            l = np.ones(num_groups) if ard else 1.0
+            init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
+            kernel = subspace_mixing_L1RBF(l,(1.e-5,1.e5),
+                                           mix_vals=init_mix_vals,
+                                           groups=groups,num_groups=num_groups,
+                                           dim_range=feature_range,comp=comp_style)
+            mixing = True
+        elif kernel_settings[0] == "l2rbfmixpr":
+            l = np.ones(num_groups) if ard else 1.0
+            init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
+            kernel = subspace_mixing_L2RBF(l,(1.e-5,1.e5),
+                                           mix_vals=init_mix_vals,
+                                           groups=groups,num_groups=num_groups,
+                                           dim_range=feature_range,comp=comp_style)
+            mixing = True
+        elif kernel_settings[0] == "l1rbfprpca":
+            pca = PCA(n_components=num_groups)
+            X_pca = X[:,feature_range[0]:feature_range[1]+1] if comp_style else X[:,feature_range[0]:feature_range[1]]
+            pca.fit(X_pca)
+            l = np.ones(pca.n_components_) if ard else 1.0
+            kernel = subspace_PCA_L1RBF(l,(1.e-5,1.e5),
+                                           pca_components=pca.components_,
+                                           dim_range=feature_range,comp=comp_style)
+        elif kernel_settings[0] == "l2rbfprpca":
+            pca = PCA(n_components=num_groups)
+            X_pca = X[:,feature_range[0]:feature_range[1]+1] if comp_style else X[:,feature_range[0]:feature_range[1]]
+            pca.fit(X_pca)
+            l = np.ones(pca.n_components_) if ard else 1.0
+            kernel = subspace_PCA_L2RBF(l,(1.e-5,1.e5),
+                                           pca_components=pca.components_,
+                                           dim_range=feature_range,comp=comp_style)    
         else:
-            l = 1.0
-        kernel = L1RBF(l,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
-    elif kernel_settings[0] == "l2rbf":
-        if ard and comp_style:
-            l = np.ones(n_feats+1)
-        elif ard:
-            l = np.ones(n_feats)
-        else:
-            l = 1.0
-        kernel = L2RBF(l,(1.e-5,1.e5),dims=n,dim_range=feature_range,comp=comp_style)
-    elif kernel_settings[0] == "physrbf":
-        l = 1.e4*np.ones(n_feats//2) if ard else 1.e4
-        kernel = physRBF(l,(1.e-1,1.e8),dims=n,dim_range=feature_range)
-    elif kernel_settings[0] == "l1rbfpr":
-        l = np.ones(num_groups) if ard else 1.0
-        kernel = subspace_L1RBF(l,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
-                                dim_range=feature_range,comp=comp_style)
-    elif kernel_settings[0] == "l2rbfpr":
-        l = np.ones(num_groups) if ard else 1.0
-        kernel = subspace_L2RBF(l,(1.e-5,1.e5),groups=groups,num_groups=num_groups,
-                                dim_range=feature_range,comp=comp_style)
-    elif kernel_settings[0] == "l1rbfmixpr":
-        l = np.ones(num_groups) if ard else 1.0
-        init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
-        kernel = subspace_mixing_L1RBF(l,(1.e-5,1.e5),
-                                       mix_vals=init_mix_vals,
-                                       groups=groups,num_groups=num_groups,
-                                       dim_range=feature_range,comp=comp_style)
-        mixing = True
-    elif kernel_settings[0] == "l2rbfmixpr":
-        l = np.ones(num_groups) if ard else 1.0
-        init_mix_vals = 0.5*np.ones(sum([1 if np.size(_)>1 else 0 for _  in groups]))
-        kernel = subspace_mixing_L2RBF(l,(1.e-5,1.e5),
-                                       mix_vals=init_mix_vals,
-                                       groups=groups,num_groups=num_groups,
-                                       dim_range=feature_range,comp=comp_style)
-        mixing = True
+            kernel = None
+        return kernel,mixing
+    kernel,use_mixing = setup_sub_kernel(comp_kernel_0,comp_range)
+    if kernel:
+        for range_,kernel_type in zip((comp_range,ht_range,ht_range),(comp_kernel_1,ht_kernel_0,ht_kernel_1)):
+            kernel_1,use_mixing_1 = setup_sub_kernel(kernel_type,range_)
+            if kernel_1:
+                kernel += ConstantKernel(0.01,(1.e-6,1.)) * kernel_1
+            use_mixing = use_mixing or use_mixing_1
     else:
-        kernel = None
-    return kernel,mixing
-kernel,use_mixing = setup_kernel(comp_kernel_0,comp_range)
-if kernel:
-    for range_,kernel_type in zip((comp_range,ht_range,ht_range),(comp_kernel_1,ht_kernel_0,ht_kernel_1)):
-        kernel_1,use_mixing_1 = setup_kernel(kernel_type,range_)
-        if kernel_1:
-            kernel += ConstantKernel(0.01,(1.e-6,1.)) * kernel_1
-        use_mixing = use_mixing or use_mixing_1
-else:
-    print("Kernel has been misdefined in config file.")
-kernel *= ConstantKernel()
+        print("Kernel has been misdefined in config file.")
+    kernel *= ConstantKernel()
+    return kernel,use_mixing
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -997,7 +1084,11 @@ for fold_i in range(n_folds):
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL FITTING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    # Setup model 
+    # Setup model
+    # This data is only used for PCA (if that option has been chosen).
+    X = get_Xy(train_df,None,drop_els=["Hf","Nb"],ht=True)
+    kernel,use_mixing = setup_kernel(X)
+    # The model object which is used for all the further fitting.
     model_k = model(elements,kernel,alpha_noise,seed,
                     standardise_comp,standardise_ht,comp_range,ht_range,
                     kernel_pr_mixing=use_mixing,use_superalloy_model=superalloy_model,

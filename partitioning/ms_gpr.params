@@ -16,7 +16,7 @@ n_folds = 1
 standardise_ht = false
 standardise_comp = false
 kernel_noise = 0.05
-# Options for kernels: L2RBF, L1RBF, physRBF, L1RBFpr, L2RBFpr, L1RBFmixPr, L2RBFmixPr, None ...
+# Options for kernels: L2RBF, L1RBF, physRBF, L1RBFpr, L2RBFpr, L1RBFmixPr, L2RBFmixPr, L1RBFprPCA, L2RBFprPCA, None ...
 # ... or the same but suffixed with _comp to include composition transformation in kernel...
 # ... can also suffix _ARD to include automatic relevance determination...
 # ... kernels that project features to a subspace need supply a grouping too. 
@@ -24,7 +24,8 @@ comp_kernel_0 = L1RBFpr_comp
 comp_kernel_1 = L1RBF_comp
 ht_kernel_0 = physRBF
 ht_kernel_1 = None
-# Grouping (i.e. rank of projection matrix, and position of 1s in matrix).
+# Grouping (i.e. rank of projection matrix, and position of 1s in matrix)...
+# ...also used for PCA. In this case it is passed to sklearn PCA() and can therefore use a float <1.
 projection_rank = 3
 projection_groups = 0,0,0,1,1,2,2,1,2,1
 # Use a special superalloy model for mean function of certain elements
