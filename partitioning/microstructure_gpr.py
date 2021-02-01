@@ -85,6 +85,8 @@ comp_kernel_1 =     my_config.get("comp_kernel_1")
 ht_kernel_0 =       my_config.get("ht_kernel_0")
 ht_kernel_1 =       my_config.get("ht_kernel_1")
 alpha_noise =       my_config.getfloat("kernel_noise")
+noise_kernel =      my_config.getboolean("fit_noise")
+#alpha_noise = 0.0 if noise_kernel else alpha_noise
 groups =            my_config.get("projection_groups")
 groups = parse_listlike(groups)
 num_groups =        my_config.getfloat("projection_rank")
@@ -535,7 +537,7 @@ class subspace_PCA_L2RBF(L2RBF):
             Ilike = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],Ilike]        # Subspace projection part of matrix
         self.A = (self.pca_components @ Ilike).T
     
-class subspace_PCA_L1RBF(L2RBF):
+class subspace_PCA_L1RBF(L1RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
                  pca_components=None,
                  dims=15,dim_range=None,comp=True):
@@ -840,6 +842,7 @@ class model():
                  n_restarts_optimizer=2,
                  phases=2,kernel_pr_mixing=False,
                  use_superalloy_model=True,
+                 use_fitted_noise=True,
                  mean_fn_els=["Al","Ta","Ti"],mean_fn_use=["Al","Ta","Ti"],x_former=.2):
         self.proto_kernel = kernel
         self.elements = elements
@@ -850,6 +853,7 @@ class model():
         self.phases = phases
         self.mixing = kernel_pr_mixing
         self.use_superalloy_model = use_superalloy_model
+        self.use_fitted_noise = use_fitted_noise
         # Setup mean function model
         mean_fn_els = [comp_range[0]+i-1 for i,el in enumerate(elements) if el in mean_fn_els]
         if use_superalloy_model:
@@ -920,9 +924,13 @@ class model():
                 # Print some output from the model.
                 if verbosity >= 1:
                     print("Fitting model for "+ms_ft+" phase "+sub_ft+" feature...")
-                    if verbosity >= 2 and self.mixing:
-                        print("Pseudo-element representation for model:")
-                        sub_model.get_mixing_vals(self.elements)
+                    if verbosity >= 2:
+                        if self.use_fitted_noise:
+                            noise_ = np.exp(sub_model.gpr.kernel_.theta[-1])
+                            print("White noise kernel noise level = {:.4e}".format(noise_))
+                        if self.mixing:
+                            print("Pseudo-element representation for model:")
+                            sub_model.get_mixing_vals(self.elements)
                     print(120*"-")
     
     def sub_predict(self,X_data,
@@ -1084,6 +1092,8 @@ def setup_kernel(X=None):
     else:
         print("Kernel has been misdefined in config file.")
     kernel *= ConstantKernel()
+    if noise_kernel:
+        kernel += gp.kernels.WhiteKernel(noise_level_bounds=(1.e-6,1.e6))
     return kernel,use_mixing
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA SECTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1125,7 +1135,8 @@ for fold_i in range(n_folds):
                     standardise_comp,standardise_ht,comp_range,ht_range,
                     kernel_pr_mixing=use_mixing,use_superalloy_model=superalloy_model,
                     mean_fn_els=mean_fn_els,mean_fn_use=mean_fn_use,
-                    n_restarts_optimizer=n_restarts)
+                    n_restarts_optimizer=n_restarts,
+                    use_fitted_noise=noise_kernel)
     # Get the test/training data
     ml_data_dict = model_k.matching_data_struct()
     ml_data_dict_t = deepcopy(ml_data_dict) # To store the test data.
@@ -1256,7 +1267,7 @@ model_colours = np.array(list(
 
 #%% Plotting stuff
 # Function to plot results
-def plot_f_byModel(f_true,f_pred,f_stds,
+def plot_byModel(f_true,f_pred,f_stds,
                    lims=None):
     fig,axs=plt.subplots()
     plt.errorbar(f_true,f_pred,yerr=f_stds,fmt=".",ecolor="k",elinewidth=0.5,zorder=0)

@@ -1,17 +1,18 @@
-[test_1e-2.400]
+[test]
 save = False
 n_fold_testing = true
 n_folds = 6
 seed = 1934
-standardise_ht = true
+standardise_ht = false
 standardise_comp = false
 verbosity = 2
 comp_kernel_0 = L2RBFprPCA_comp
 comp_kernel_1 = L1RBF_comp
-ht_kernel_0 = L2RBF
+ht_kernel_0 = physRBF
 ht_kernel_1 = None
-kernel_noise = 0.00398107170553497
-projection_rank = 0.9
+kernel_noise = 0.0
+fit_noise = True
+projection_rank = 0.95
 #projection_groups = 0,(0,2),0,(0,1),(0,1),2,2,(0,1),2,(0,1)
 #mean_fn_use = Al,Ti
-fitting_restarts = 2
+fitting_restarts = 3
