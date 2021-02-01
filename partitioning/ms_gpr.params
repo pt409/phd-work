@@ -12,11 +12,13 @@ seed = 2106
 test_pc = 13.0
 n_fold_testing = false
 n_folds = 1
+# Number of restarts when fitting GPR model. Passed to the sklearn class for GPR.
+fitting_restarts = 2
 # Kernel settings.
 standardise_ht = false
 standardise_comp = false
 kernel_noise = 0.05
-# Options for kernels: L2RBF, L1RBF, physRBF, L1RBFpr, L2RBFpr, L1RBFmixPr, L2RBFmixPr, L1RBFprPCA, L2RBFprPCA, None ...
+# Options for kernels: L2RBF, L1RBF, physRBF, L1RBFpr, L2RBFpr, L1RBFmixPr, L2RBFmixPr, L1RBFprPCA, L2RBFprPCA, Linear, None ...
 # ... or the same but suffixed with _comp to include composition transformation in kernel...
 # ... can also suffix _ARD to include automatic relevance determination...
 # ... kernels that project features to a subspace need supply a grouping too. 
@@ -31,9 +33,7 @@ projection_groups = 0,0,0,1,1,2,2,1,2,1
 # Use a special superalloy model for mean function of certain elements
 mean_fn_els = Al,Ta,Ti
 # Which elements to use the model for. None means the model isn't used
-mean_fn_use = Al,Ti
-# Options for the predictive model
-# Sub-models 
+mean_fn_use = None
 # Output details, verbosity in ascending order, 0,1, or 2.
 verbosity = 1
 

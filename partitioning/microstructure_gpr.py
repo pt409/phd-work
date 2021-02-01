@@ -20,6 +20,7 @@ from sklearn.gaussian_process.kernels import ConstantKernel
 from sklearn.decomposition import PCA
 #from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import pdist, cdist, squareform
+from scipy.optimize import minimize
 
 import matplotlib.pyplot as plt
 
@@ -91,6 +92,7 @@ num_groups = int(num_groups) if num_groups%1 != num_groups else num_groups
 mean_fn_els =       my_config.get("mean_fn_els").split(",")
 mean_fn_use =       my_config.get("mean_fn_use").split(",")
 superalloy_model = False if len(mean_fn_use)==1 and mean_fn_use[0].lower()=="none" else True
+n_restarts =        my_config.getint("fitting_restarts")
 # Verbosity of output
 v =                 my_config.getint("verbosity")
 if v > 1:
@@ -187,6 +189,27 @@ def get_Xy(df,y_header,drop_els=["Ni","Hf","Nb"],
     else:
         return X
 
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% GPR %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# Inherited from sklearn.
+class customGPR(GaussianProcessRegressor):
+    def __init__(self, *args, max_iter=15000, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._max_iter = max_iter
+    
+    def _constrained_optimization(self, obj_func, initial_theta, bounds):
+        def new_optimizer(obj_func, initial_theta, bounds):
+            opt_res = minimize(
+                obj_func,
+                initial_theta,
+                method="L-BFGS-B",
+                jac=True,
+                bounds=bounds,
+                options={"maxiter":self._max_iter},
+            )
+            return opt_res.x, opt_res.fun
+        self.optimizer = new_optimizer
+        return super()._constrained_optimization(obj_func, initial_theta, bounds)
+
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SCALER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Based on sklearn.preprocessing.StandardScaler
 class PartScaler():
@@ -244,6 +267,54 @@ class PartScaler():
         return self.transform(X,copy_)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% KERNELS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# Modification of base DotProduct class
+class Linear(gp.kernels.DotProduct):
+    def __init__(self,sigma_0=1.0,sigma_0_bounds=(1.e-5,1.e5),
+                 dims=15,dim_range=None,comp=True):
+        super(Linear,self).__init__(sigma_0,sigma_0_bounds)
+        self.dims = dims
+        self.dim_range = dim_range
+        self.comp = comp
+        self.constr_trans()
+        
+    def constr_trans(self):
+        A = np.eye(self.dims)
+        if self.dim_range: 
+            A = A[self.dim_range[0]:self.dim_range[1],:]
+        if self.comp: 
+            A = np.r_[[np.append(np.zeros(self.dim_range[0]),np.ones(self.dims-self.dim_range[0]))],A]
+        A = A.T # Use transpose since vectors are represented by rows not columns.
+        self.A = A
+        
+    def trans(self,X):
+        return X@self.A
+        
+    def __call__(self, X, Y=None, eval_gradient=False):
+        X = np.atleast_2d(X)
+        X = self.trans(X)
+        if Y is None:
+            K = np.inner(X, X) + self.sigma_0 ** 2
+        else:
+            if eval_gradient:
+                raise ValueError(
+                    "Gradient can only be evaluated when Y is None.")
+            Y = self.trans(Y)
+            K = np.inner(X, Y) + self.sigma_0 ** 2
+
+        if eval_gradient:
+            if not self.hyperparameter_sigma_0.fixed:
+                K_gradient = np.empty((K.shape[0], K.shape[1], 1))
+                K_gradient[..., 0] = 2 * self.sigma_0 ** 2
+                return K, K_gradient
+            else:
+                return K, np.empty((X.shape[0], X.shape[0], 0))
+        else:
+            return K
+    
+    def diag(self, X):
+        X = self.trans(X)
+        return np.einsum('ij,ij->i', X, X) + self.sigma_0 ** 2
+        
 # Modification of base RBF class
 class L2RBF(gp.kernels.RBF):
     def __init__(self,length_scale=1.0,length_scale_bounds=(1.e-5,1.e5),
@@ -803,11 +874,12 @@ class model():
         else:
             scaler = None
         # Setup a generic Gaussian process regression model
-        gpr = GaussianProcessRegressor(kernel=self.proto_kernel,
-                                           normalize_y=True,
-                                           random_state=seed,
-                                           alpha=self.alpha,
-                                           n_restarts_optimizer=self.n_restarts_optimizer)
+        gpr = customGPR(kernel=self.proto_kernel,
+                        normalize_y=True,
+                        random_state=seed,
+                        alpha=self.alpha,
+                        n_restarts_optimizer=self.n_restarts_optimizer,
+                        max_iter=1e5)
         # Add all the relevant sub-models.
         self.sub_models = {}
         for ind,el in enumerate(self.elements):
@@ -884,49 +956,7 @@ class model():
                         predictions[sub_ft]["val"][:,0] = y
                         predictions[sub_ft]["std"][:,0] = y_std
         return predictions
-    
-    # Currently this only handles two phases alloys.
-    def predict_legacy(self,X,return_std=True,log_y=True):
-        # Here X should be just an array.
-        # x is composition part of X
-        N = X.shape[0]
-        x = np.zeros((N,len(self.elements)))
-        x[:,1:] = X[:,self.comp_range[0]:self.comp_range[1]]
-        x[:,0]  = 1.-x.sum(axis=1)
-        # Different f models are stored for comparison
-        f_all = np.empty((len(self.sub_models.keys()),N))
-        f_std = f_all.copy()
-        # Predicitions for each sub-component of the microstrucutre using gpr model.
-        sub_predictions = self.sub_predict(X,data_structured=False,return_std=True,log_y=True)
-        f_0 = sub_predictions["f1"]["val"]
-        f_std_0 = sub_predictions["f1"]["std"]
-        f_all[0,:] = f_0
-        f_std[0,:] = f_std_0
-        # Calculate microstructural features for each alloy, and associated errors.
-        for i,el in enumerate(self.elements):
-            K1,K1_std = sub_predictions[el]["nom:1"]
-            K2,K2_std = sub_predictions[el]["1:2"]
-            # Calculate fraction according to this model.
-            f_i = (K2-K1)/(1.-K1)
-            f_i_std = np.sqrt(((K2-1.)*K1_std)**2+((K1-1.)*K2_std)**2)/(1.-K1)**2
-            f_all[i+1,:] = f_i
-            f_std[i+1,:] = f_i_std
-            # Calculate x_i_prc according to 1st part. coeff. model
-            x_i = x[:,i]
-            x_i_prc_mod1 = x_i/np.abs(f_0+(1.-f_0)*K1)
-            x_i_std_mod1 = np.sqrt(((1.-K1)*f_std_0)**2 + ((1.-f_std_0)*K1_std)**2)*x_i_prc_mod1**2/x_i
-            # Calculate x_i_prc according to 2nd part. coeff. model
-            x_i_prc_mod2 = x_i/K2
-            x_i_std_mod2 = (x_i/K2**2)*K2_std
-        # Now choose best model for precipitate fraction
-        f_std_frac = np.abs(f_std/f_all) # use fractional error
-        best_locs = np.where(f_std_frac == np.nanmin(f_std_frac,axis=0))
-        best_locs = (best_locs[0][best_locs[1].argsort()],np.sort(best_locs[1]))
-        best_models = best_locs[0] # Store which models were best for which data points.
-        f_best = f_all[best_locs]
-        f_best_std = f_std[best_locs] # Want absolute errors here
-        return f_best,f_best_std,best_models
-    
+        
     def predict(self,X,lambda_=0.0):
         # Here X should be just an array.
         # x is composition part of X
@@ -1038,7 +1068,9 @@ def setup_kernel(X=None):
             l = np.ones(pca.n_components_) if ard else 1.0
             kernel = subspace_PCA_L2RBF(l,(1.e-5,1.e5),
                                            pca_components=pca.components_,
-                                           dim_range=feature_range,comp=comp_style)    
+                                           dim_range=feature_range,comp=comp_style)  
+        elif kernel_settings[0] == "linear":
+            kernel = Linear(dims=15,dim_range=feature_range,comp=comp_style)
         else:
             kernel = None
         return kernel,mixing
@@ -1092,7 +1124,8 @@ for fold_i in range(n_folds):
     model_k = model(elements,kernel,alpha_noise,seed,
                     standardise_comp,standardise_ht,comp_range,ht_range,
                     kernel_pr_mixing=use_mixing,use_superalloy_model=superalloy_model,
-                    mean_fn_els=mean_fn_els,mean_fn_use=mean_fn_use)
+                    mean_fn_els=mean_fn_els,mean_fn_use=mean_fn_use,
+                    n_restarts_optimizer=n_restarts)
     # Get the test/training data
     ml_data_dict = model_k.matching_data_struct()
     ml_data_dict_t = deepcopy(ml_data_dict) # To store the test data.
